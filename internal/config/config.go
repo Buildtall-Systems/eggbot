@@ -1,6 +1,11 @@
 package config
 
 import (
+	"fmt"
+	"os"
+
+	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/viper"
 )
 
@@ -20,8 +25,10 @@ type DatabaseConfig struct {
 
 // NostrConfig holds Nostr-related settings.
 type NostrConfig struct {
-	Relays  []string
-	BotNpub string // Bot's public key in npub format
+	Relays        []string
+	BotNpub       string // Bot's public key in npub format (from config)
+	BotSecretHex  string // Bot's secret key in hex (derived from EGGBOT_NSEC env)
+	BotPubkeyHex  string // Bot's public key in hex (derived from secret)
 }
 
 // PricingConfig holds egg pricing settings.
@@ -30,6 +37,7 @@ type PricingConfig struct {
 }
 
 // Load reads configuration from Viper and returns a Config struct.
+// Does not load secrets - use LoadWithSecrets for full runtime config.
 func Load() (*Config, error) {
 	cfg := &Config{
 		Verbose: viper.GetBool("verbose"),
@@ -55,6 +63,63 @@ func Load() (*Config, error) {
 	}
 	if cfg.Pricing.SatsPerHalfDozen == 0 {
 		cfg.Pricing.SatsPerHalfDozen = 3200
+	}
+
+	return cfg, nil
+}
+
+// LoadWithSecrets loads config and derives bot keypair from EGGBOT_NSEC env var.
+// Returns error if EGGBOT_NSEC is not set or invalid.
+func LoadWithSecrets() (*Config, error) {
+	cfg, err := Load()
+	if err != nil {
+		return nil, err
+	}
+
+	nsec := os.Getenv("EGGBOT_NSEC")
+	if nsec == "" {
+		return nil, fmt.Errorf("EGGBOT_NSEC environment variable is required")
+	}
+
+	// Decode nsec to get hex secret key
+	prefix, value, err := nip19.Decode(nsec)
+	if err != nil {
+		return nil, fmt.Errorf("invalid EGGBOT_NSEC: %w", err)
+	}
+	if prefix != "nsec" {
+		return nil, fmt.Errorf("EGGBOT_NSEC must be an nsec, got %s", prefix)
+	}
+
+	secretHex, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("failed to decode nsec value")
+	}
+
+	// Derive public key from secret
+	pubkeyHex, err := nostr.GetPublicKey(secretHex)
+	if err != nil {
+		return nil, fmt.Errorf("deriving public key: %w", err)
+	}
+
+	cfg.Nostr.BotSecretHex = secretHex
+	cfg.Nostr.BotPubkeyHex = pubkeyHex
+
+	// Verify derived pubkey matches config if specified
+	if cfg.Nostr.BotNpub != "" {
+		configPrefix, configValue, err := nip19.Decode(cfg.Nostr.BotNpub)
+		if err != nil {
+			return nil, fmt.Errorf("invalid nostr.bot_npub in config: %w", err)
+		}
+		if configPrefix != "npub" {
+			return nil, fmt.Errorf("nostr.bot_npub must be an npub, got %s", configPrefix)
+		}
+		configPubkeyHex, ok := configValue.(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to decode npub value")
+		}
+		if configPubkeyHex != pubkeyHex {
+			return nil, fmt.Errorf("EGGBOT_NSEC does not match nostr.bot_npub in config")
+		}
 	}
 
 	return cfg, nil
