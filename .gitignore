@@ -1,0 +1,12 @@
+bin/
+dist/
+vendor/
+*.db
+*.db-shm
+*.db-wal
+tmp/*
+!tmp/.gitkeep
+.env
+.env.local
+eggbot
+result
