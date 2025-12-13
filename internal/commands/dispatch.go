@@ -1,0 +1,69 @@
+package commands
+
+import (
+	"context"
+
+	"github.com/buildtall-systems/eggbot/internal/db"
+	"github.com/nbd-wtf/go-nostr/nip19"
+)
+
+// ExecuteConfig holds configuration needed for command execution.
+type ExecuteConfig struct {
+	SatsPerHalfDozen int
+	Admins           []string
+}
+
+// Execute runs the command and returns a result.
+// senderPubkeyHex is the sender's public key in hex format.
+func Execute(ctx context.Context, database *db.DB, cmd *Command, senderPubkeyHex string, cfg ExecuteConfig) Result {
+	// Convert hex pubkey to npub for database operations
+	senderNpub, err := nip19.EncodePublicKey(senderPubkeyHex)
+	if err != nil {
+		return Result{Error: err}
+	}
+
+	isAdmin := IsAdmin(senderPubkeyHex, cfg.Admins)
+
+	switch cmd.Name {
+	// Customer commands
+	case CmdInventory:
+		return InventoryCmd(ctx, database)
+
+	case CmdOrder:
+		return OrderCmd(ctx, database, senderNpub, cmd.Args, cfg.SatsPerHalfDozen)
+
+	case CmdBalance:
+		return BalanceCmd(ctx, database, senderNpub)
+
+	case CmdHistory:
+		return HistoryCmd(ctx, database, senderNpub)
+
+	case CmdHelp:
+		return HelpCmd(isAdmin)
+
+	// Admin commands
+	case CmdAdd:
+		return AddEggsCmd(ctx, database, cmd.Args)
+
+	case CmdDeliver:
+		return DeliverCmd(ctx, database, cmd.Args)
+
+	case CmdPayment:
+		return PaymentCmd(ctx, database, cmd.Args)
+
+	case CmdAdjust:
+		return AdjustCmd(ctx, database, cmd.Args)
+
+	case CmdCustomers:
+		return CustomersCmd(ctx, database)
+
+	case CmdAddCustomer:
+		return AddCustomerCmd(ctx, database, cmd.Args)
+
+	case CmdRemoveCustomer:
+		return RemoveCustomerCmd(ctx, database, cmd.Args)
+
+	default:
+		return HelpCmd(isAdmin)
+	}
+}

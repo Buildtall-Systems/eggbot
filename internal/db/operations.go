@@ -1,0 +1,416 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// ErrInsufficientInventory indicates not enough eggs available.
+var ErrInsufficientInventory = errors.New("insufficient inventory")
+
+// ErrCustomerNotFound indicates customer does not exist.
+var ErrCustomerNotFound = errors.New("customer not found")
+
+// ErrOrderNotFound indicates order does not exist.
+var ErrOrderNotFound = errors.New("order not found")
+
+// ErrCustomerExists indicates customer already registered.
+var ErrCustomerExists = errors.New("customer already exists")
+
+// Customer represents a registered customer.
+type Customer struct {
+	ID        int64
+	Npub      string
+	Name      sql.NullString
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// Order represents an egg order.
+type Order struct {
+	ID         int64
+	CustomerID int64
+	Quantity   int
+	TotalSats  int64
+	Status     string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Transaction represents a zap payment record.
+type Transaction struct {
+	ID         int64
+	OrderID    sql.NullInt64
+	ZapEventID string
+	AmountSats int64
+	SenderNpub string
+	CreatedAt  time.Time
+}
+
+// GetInventory returns the current egg count.
+func (db *DB) GetInventory(ctx context.Context) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT eggs_available FROM inventory WHERE id = 1`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("querying inventory: %w", err)
+	}
+	return count, nil
+}
+
+// AddEggs increments the inventory by count.
+func (db *DB) AddEggs(ctx context.Context, count int) error {
+	_, err := db.ExecContext(ctx, `
+		UPDATE inventory
+		SET eggs_available = eggs_available + ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1
+	`, count)
+	if err != nil {
+		return fmt.Errorf("adding eggs: %w", err)
+	}
+	return nil
+}
+
+// DeductEggs decrements the inventory by count. Returns ErrInsufficientInventory if not enough.
+func (db *DB) DeductEggs(ctx context.Context, count int) error {
+	result, err := db.ExecContext(ctx, `
+		UPDATE inventory
+		SET eggs_available = eggs_available - ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1 AND eggs_available >= ?
+	`, count, count)
+	if err != nil {
+		return fmt.Errorf("deducting eggs: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrInsufficientInventory
+	}
+	return nil
+}
+
+// GetCustomerByNpub returns a customer by their npub.
+func (db *DB) GetCustomerByNpub(ctx context.Context, npub string) (*Customer, error) {
+	var c Customer
+	err := db.QueryRowContext(ctx, `
+		SELECT id, npub, name, created_at, updated_at
+		FROM customers WHERE npub = ?
+	`, npub).Scan(&c.ID, &c.Npub, &c.Name, &c.CreatedAt, &c.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrCustomerNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying customer: %w", err)
+	}
+	return &c, nil
+}
+
+// CreateCustomer registers a new customer.
+func (db *DB) CreateCustomer(ctx context.Context, npub string) (*Customer, error) {
+	result, err := db.ExecContext(ctx, `
+		INSERT INTO customers (npub) VALUES (?)
+	`, npub)
+	if err != nil {
+		// Check for unique constraint violation
+		if isUniqueViolation(err) {
+			return nil, ErrCustomerExists
+		}
+		return nil, fmt.Errorf("creating customer: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("getting customer id: %w", err)
+	}
+
+	return &Customer{ID: id, Npub: npub}, nil
+}
+
+// RemoveCustomer deletes a customer by npub.
+func (db *DB) RemoveCustomer(ctx context.Context, npub string) error {
+	result, err := db.ExecContext(ctx, `DELETE FROM customers WHERE npub = ?`, npub)
+	if err != nil {
+		return fmt.Errorf("removing customer: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrCustomerNotFound
+	}
+	return nil
+}
+
+// ListCustomers returns all registered customers.
+func (db *DB) ListCustomers(ctx context.Context) ([]Customer, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, npub, name, created_at, updated_at
+		FROM customers ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying customers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var customers []Customer
+	for rows.Next() {
+		var c Customer
+		if err := rows.Scan(&c.ID, &c.Npub, &c.Name, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning customer: %w", err)
+		}
+		customers = append(customers, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating customers: %w", err)
+	}
+	return customers, nil
+}
+
+// CreateOrder creates a new order for a customer.
+func (db *DB) CreateOrder(ctx context.Context, customerID int64, quantity int, totalSats int64) (*Order, error) {
+	result, err := db.ExecContext(ctx, `
+		INSERT INTO orders (customer_id, quantity, total_sats, status)
+		VALUES (?, ?, ?, 'pending')
+	`, customerID, quantity, totalSats)
+	if err != nil {
+		return nil, fmt.Errorf("creating order: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("getting order id: %w", err)
+	}
+
+	return &Order{
+		ID:         id,
+		CustomerID: customerID,
+		Quantity:   quantity,
+		TotalSats:  totalSats,
+		Status:     "pending",
+	}, nil
+}
+
+// GetOrderByID returns an order by ID.
+func (db *DB) GetOrderByID(ctx context.Context, orderID int64) (*Order, error) {
+	var o Order
+	err := db.QueryRowContext(ctx, `
+		SELECT id, customer_id, quantity, total_sats, status, created_at, updated_at
+		FROM orders WHERE id = ?
+	`, orderID).Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.CreatedAt, &o.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrOrderNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying order: %w", err)
+	}
+	return &o, nil
+}
+
+// GetCustomerOrders returns orders for a customer, most recent first.
+func (db *DB) GetCustomerOrders(ctx context.Context, customerID int64, limit int) ([]Order, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, customer_id, quantity, total_sats, status, created_at, updated_at
+		FROM orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT ?
+	`, customerID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying orders: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var orders []Order
+	for rows.Next() {
+		var o Order
+		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning order: %w", err)
+		}
+		orders = append(orders, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating orders: %w", err)
+	}
+	return orders, nil
+}
+
+// GetPendingOrdersByCustomer returns pending orders for a customer.
+func (db *DB) GetPendingOrdersByCustomer(ctx context.Context, customerID int64) ([]Order, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, customer_id, quantity, total_sats, status, created_at, updated_at
+		FROM orders WHERE customer_id = ? AND status = 'pending' ORDER BY created_at DESC
+	`, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("querying pending orders: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var orders []Order
+	for rows.Next() {
+		var o Order
+		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning order: %w", err)
+		}
+		orders = append(orders, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating orders: %w", err)
+	}
+	return orders, nil
+}
+
+// UpdateOrderStatus updates the status of an order.
+func (db *DB) UpdateOrderStatus(ctx context.Context, orderID int64, status string) error {
+	result, err := db.ExecContext(ctx, `
+		UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+	`, status, orderID)
+	if err != nil {
+		return fmt.Errorf("updating order status: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrOrderNotFound
+	}
+	return nil
+}
+
+// FulfillOrder marks an order as fulfilled and deducts inventory atomically.
+func (db *DB) FulfillOrder(ctx context.Context, orderID int64) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Get order details
+	var quantity int
+	var status string
+	err = tx.QueryRowContext(ctx, `SELECT quantity, status FROM orders WHERE id = ?`, orderID).Scan(&quantity, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrOrderNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("querying order: %w", err)
+	}
+
+	if status == "fulfilled" {
+		return fmt.Errorf("order already fulfilled")
+	}
+
+	// Deduct inventory
+	result, err := tx.ExecContext(ctx, `
+		UPDATE inventory
+		SET eggs_available = eggs_available - ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1 AND eggs_available >= ?
+	`, quantity, quantity)
+	if err != nil {
+		return fmt.Errorf("deducting inventory: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrInsufficientInventory
+	}
+
+	// Update order status
+	_, err = tx.ExecContext(ctx, `
+		UPDATE orders SET status = 'fulfilled', updated_at = CURRENT_TIMESTAMP WHERE id = ?
+	`, orderID)
+	if err != nil {
+		return fmt.Errorf("updating order: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing transaction: %w", err)
+	}
+	return nil
+}
+
+// RecordTransaction records a zap payment.
+func (db *DB) RecordTransaction(ctx context.Context, orderID *int64, zapEventID string, amountSats int64, senderNpub string) (*Transaction, error) {
+	var orderIDVal sql.NullInt64
+	if orderID != nil {
+		orderIDVal = sql.NullInt64{Int64: *orderID, Valid: true}
+	}
+
+	result, err := db.ExecContext(ctx, `
+		INSERT INTO transactions (order_id, zap_event_id, amount_sats, sender_npub)
+		VALUES (?, ?, ?, ?)
+	`, orderIDVal, zapEventID, amountSats, senderNpub)
+	if err != nil {
+		return nil, fmt.Errorf("recording transaction: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("getting transaction id: %w", err)
+	}
+
+	return &Transaction{
+		ID:         id,
+		OrderID:    orderIDVal,
+		ZapEventID: zapEventID,
+		AmountSats: amountSats,
+		SenderNpub: senderNpub,
+	}, nil
+}
+
+// GetCustomerBalance returns total sats received from a customer.
+func (db *DB) GetCustomerBalance(ctx context.Context, npub string) (int64, error) {
+	var balance sql.NullInt64
+	err := db.QueryRowContext(ctx, `
+		SELECT SUM(amount_sats) FROM transactions WHERE sender_npub = ?
+	`, npub).Scan(&balance)
+	if err != nil {
+		return 0, fmt.Errorf("querying balance: %w", err)
+	}
+	if !balance.Valid {
+		return 0, nil
+	}
+	return balance.Int64, nil
+}
+
+// GetCustomerSpent returns total sats spent by a customer on fulfilled orders.
+func (db *DB) GetCustomerSpent(ctx context.Context, customerID int64) (int64, error) {
+	var spent sql.NullInt64
+	err := db.QueryRowContext(ctx, `
+		SELECT SUM(total_sats) FROM orders WHERE customer_id = ? AND status = 'fulfilled'
+	`, customerID).Scan(&spent)
+	if err != nil {
+		return 0, fmt.Errorf("querying spent: %w", err)
+	}
+	if !spent.Valid {
+		return 0, nil
+	}
+	return spent.Int64, nil
+}
+
+// isUniqueViolation checks if the error is a unique constraint violation.
+func isUniqueViolation(err error) bool {
+	// SQLite unique constraint error contains "UNIQUE constraint failed"
+	return err != nil && (contains(err.Error(), "UNIQUE constraint failed") || contains(err.Error(), "constraint failed"))
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

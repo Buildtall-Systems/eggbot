@@ -1,4 +1,4 @@
-.PHONY: help build dev test clean lint install
+.PHONY: help build dev test clean lint install tidy
 
 BINARY_NAME=eggbot
 VERSION?=dev
@@ -13,6 +13,7 @@ help:
 	@echo "  make dev        - Run with live reload (requires air)"
 	@echo "  make test       - Run tests"
 	@echo "  make lint       - Run linter"
+	@echo "  make tidy       - Tidy go modules"
 	@echo "  make clean      - Clean build artifacts"
 	@echo "  make install    - Install binary to GOPATH/bin"
 
@@ -27,6 +28,9 @@ test:
 
 lint:
 	golangci-lint run
+
+tidy:
+	go mod tidy
 
 clean:
 	rm -rf bin/ dist/ tmp/*.db
