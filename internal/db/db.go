@@ -25,12 +25,12 @@ func Open(dbPath string) (*DB, error) {
 	sqlDB.SetMaxOpenConns(1)
 
 	if _, err := sqlDB.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("enabling foreign keys: %w", err)
 	}
 
 	if _, err := sqlDB.Exec(`PRAGMA journal_mode = WAL;`); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("setting WAL mode: %w", err)
 	}
 

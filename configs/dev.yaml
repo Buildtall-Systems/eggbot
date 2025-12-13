@@ -1,0 +1,17 @@
+# Development configuration for eggbot
+verbose: true
+
+database:
+  path: "eggbot-dev.db"
+
+nostr:
+  relays:
+    - "wss://relay.damus.io"
+  bot_npub: "npub1srcs6w4mmkjdkm6n4dh69smakmauv09vxtfrap73gr8ampwzcc8sdutrts"
+
+pricing:
+  sats_per_half_dozen: 3200
+
+# Admin npubs (can add inventory, view all orders)
+admins:
+  - "npub1..." # Replace with your admin npub
