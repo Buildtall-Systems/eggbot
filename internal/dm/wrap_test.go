@@ -6,6 +6,7 @@ import (
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/keyer"
+	"github.com/nbd-wtf/go-nostr/nip04"
 	"github.com/nbd-wtf/go-nostr/nip59"
 )
 
@@ -161,4 +162,92 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestWrapLegacyResponse(t *testing.T) {
+	ctx := context.Background()
+
+	// Create bot keyer
+	kr, err := keyer.NewPlainKeySigner(botSecretHex)
+	if err != nil {
+		t.Fatalf("creating keyer: %v", err)
+	}
+
+	message := "Hello from legacy NIP-04!"
+
+	// Wrap the response
+	wrapped, err := WrapLegacyResponse(ctx, kr, botSecretHex, botPubkeyHex, recipientPubkeyHex, message)
+	if err != nil {
+		t.Fatalf("WrapLegacyResponse() error = %v", err)
+	}
+
+	// Verify it's an encrypted direct message (kind 4)
+	if wrapped.Kind != nostr.KindEncryptedDirectMessage {
+		t.Errorf("wrapped.Kind = %d, want %d (KindEncryptedDirectMessage)", wrapped.Kind, nostr.KindEncryptedDirectMessage)
+	}
+
+	// Verify it has a p tag for the recipient
+	pTag := wrapped.Tags.Find("p")
+	if len(pTag) < 2 {
+		t.Error("wrapped event missing p tag")
+	} else if pTag[1] != recipientPubkeyHex {
+		t.Errorf("p tag = %s, want %s", pTag[1], recipientPubkeyHex)
+	}
+
+	// Verify signature is valid
+	ok, err := wrapped.CheckSignature()
+	if err != nil || !ok {
+		t.Errorf("wrapped event has invalid signature: %v", err)
+	}
+
+	// Verify content is encrypted (not plaintext)
+	if wrapped.Content == message {
+		t.Error("wrapped.Content is not encrypted (matches plaintext message)")
+	}
+}
+
+func TestWrapLegacyResponse_CanBeDecrypted(t *testing.T) {
+	ctx := context.Background()
+
+	// Create bot keyer
+	botKr, err := keyer.NewPlainKeySigner(botSecretHex)
+	if err != nil {
+		t.Fatalf("creating bot keyer: %v", err)
+	}
+
+	message := "This is a legacy NIP-04 encrypted message"
+
+	// Wrap the response
+	wrapped, err := WrapLegacyResponse(ctx, botKr, botSecretHex, botPubkeyHex, recipientPubkeyHex, message)
+	if err != nil {
+		t.Fatalf("WrapLegacyResponse() error = %v", err)
+	}
+
+	// Recipient decrypts: compute shared secret and decrypt
+	sharedSecret, err := nip04.ComputeSharedSecret(botPubkeyHex, recipientSecretHex)
+	if err != nil {
+		t.Fatalf("computing shared secret: %v", err)
+	}
+
+	decrypted, err := nip04.Decrypt(wrapped.Content, sharedSecret)
+	if err != nil {
+		t.Fatalf("decrypting message: %v", err)
+	}
+
+	// Verify the decrypted message matches original
+	if decrypted != message {
+		t.Errorf("decrypted = %q, want %q", decrypted, message)
+	}
+
+	// Verify other event fields
+	if wrapped.PubKey != botPubkeyHex {
+		t.Errorf("wrapped.PubKey = %s, want %s", wrapped.PubKey, botPubkeyHex)
+	}
+
+	pTag := wrapped.Tags.Find("p")
+	if len(pTag) < 2 {
+		t.Error("wrapped event missing p tag")
+	} else if pTag[1] != recipientPubkeyHex {
+		t.Errorf("p tag = %s, want %s", pTag[1], recipientPubkeyHex)
+	}
 }

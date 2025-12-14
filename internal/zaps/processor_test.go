@@ -2,6 +2,7 @@ package zaps
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/buildtall-systems/eggbot/internal/db"
@@ -20,10 +21,9 @@ func setupProcessorTestDB(t *testing.T) *db.DB {
 }
 
 // Test keypair (generated with nak):
-// Secret: dcfafaaebf643e0c8517e49e13ad25c60ee4a57a0b5f5fc401adbcb9d151f5f5
+// hex: dcfafaaebf643e0c8517e49e13ad25c60ee4a57a0b5f5fc401adbcb9d151f5f5
 // npub: npub1mna04t4lvslqepghuj0p8tf9cc8wfft6pd04l3qp4k7tn5237h6sj6ru9w
 const testSenderNpub = "npub1mna04t4lvslqepghuj0p8tf9cc8wfft6pd04l3qp4k7tn5237h6sj6ru9w"
-const testSenderPubkeyHex = "dcfafaaebf643e0c8517e49e13ad25c60ee4a57a0b5f5fc401adbcb9d151f5f5"
 
 func TestProcessZap_UnknownSender(t *testing.T) {
 	database := setupProcessorTestDB(t)
@@ -32,10 +32,9 @@ func TestProcessZap_UnknownSender(t *testing.T) {
 	ctx := context.Background()
 
 	zap := &ValidatedZap{
-		SenderPubkeyHex: testSenderPubkeyHex,
-		SenderNpub:      testSenderNpub,
-		AmountSats:      1000,
-		ZapEventID:      "test-zap-event-1",
+		SenderNpub: testSenderNpub,
+		AmountSats: 1000,
+		ZapEventID: "test-zap-event-1",
 	}
 
 	result, err := ProcessZap(ctx, database, zap)
@@ -49,6 +48,11 @@ func TestProcessZap_UnknownSender(t *testing.T) {
 
 	if result.AmountSats != 1000 {
 		t.Errorf("AmountSats = %d, want 1000", result.AmountSats)
+	}
+
+	// Message must contain full npub, not truncated
+	if !strings.Contains(result.Message, testSenderNpub) {
+		t.Errorf("Message should contain full npub %s, got: %s", testSenderNpub, result.Message)
 	}
 }
 
@@ -65,10 +69,9 @@ func TestProcessZap_KnownCustomer(t *testing.T) {
 	}
 
 	zap := &ValidatedZap{
-		SenderPubkeyHex: testSenderPubkeyHex,
-		SenderNpub:      testSenderNpub,
-		AmountSats:      2000,
-		ZapEventID:      "test-zap-event-2",
+		SenderNpub: testSenderNpub,
+		AmountSats: 2000,
+		ZapEventID: "test-zap-event-2",
 	}
 
 	result, err := ProcessZap(ctx, database, zap)
@@ -108,10 +111,9 @@ func TestProcessZap_DuplicateZap(t *testing.T) {
 	}
 
 	zap := &ValidatedZap{
-		SenderPubkeyHex: testSenderPubkeyHex,
-		SenderNpub:      testSenderNpub,
-		AmountSats:      1000,
-		ZapEventID:      "duplicate-zap-id",
+		SenderNpub: testSenderNpub,
+		AmountSats: 1000,
+		ZapEventID: "duplicate-zap-id",
 	}
 
 	// First zap should succeed
@@ -157,10 +159,9 @@ func TestProcessZap_AutoMarkPaid(t *testing.T) {
 
 	// Send a zap that covers the order
 	zap := &ValidatedZap{
-		SenderPubkeyHex: testSenderPubkeyHex,
-		SenderNpub:      testSenderNpub,
-		AmountSats:      3500, // More than needed
-		ZapEventID:      "auto-pay-zap",
+		SenderNpub: testSenderNpub,
+		AmountSats: 3500, // More than needed
+		ZapEventID: "auto-pay-zap",
 	}
 
 	result, err := ProcessZap(ctx, database, zap)
@@ -203,10 +204,9 @@ func TestProcessZap_InsufficientForOrder(t *testing.T) {
 
 	// Send a zap that doesn't cover the order
 	zap := &ValidatedZap{
-		SenderPubkeyHex: testSenderPubkeyHex,
-		SenderNpub:      testSenderNpub,
-		AmountSats:      1000, // Not enough
-		ZapEventID:      "partial-zap",
+		SenderNpub: testSenderNpub,
+		AmountSats: 1000, // Not enough
+		ZapEventID: "partial-zap",
 	}
 
 	result, err := ProcessZap(ctx, database, zap)

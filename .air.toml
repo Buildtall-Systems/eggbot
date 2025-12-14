@@ -3,7 +3,7 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  args_bin = []
+  args_bin = ["run"]
   bin = "./tmp/eggbot"
   cmd = "go build -o ./tmp/eggbot ./cmd/eggbot"
   delay = 1000

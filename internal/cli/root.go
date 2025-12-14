@@ -48,7 +48,14 @@ func initConfig() {
 	viper.SetEnvPrefix("EGGBOT")
 	viper.AutomaticEnv()
 
-	if err := viper.ReadInConfig(); err == nil && viper.GetBool("verbose") {
+	if err := viper.ReadInConfig(); err != nil {
+		// If user explicitly specified a config file, fail loudly
+		if cfgFile != "" {
+			fmt.Fprintf(os.Stderr, "Error reading config file %s: %v\n", cfgFile, err)
+			os.Exit(1)
+		}
+		// Otherwise, missing default config is acceptable
+	} else if viper.GetBool("verbose") {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	}
 }

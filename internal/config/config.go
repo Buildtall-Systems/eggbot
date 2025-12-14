@@ -34,8 +34,9 @@ type NostrConfig struct {
 
 // LightningConfig holds Lightning payment settings.
 type LightningConfig struct {
-	LnurlPubkeyNpub string // LNURL provider's npub (from config)
-	LnurlPubkeyHex  string // Derived hex pubkey for zap validation
+	LnurlPubkeyNpub  string // LNURL provider's npub (from config)
+	LnurlPubkeyHex   string // Derived hex pubkey for zap validation
+	LightningAddress string // Lightning address for payments (e.g., user@getalby.com)
 }
 
 // PricingConfig holds egg pricing settings.
@@ -56,7 +57,8 @@ func Load() (*Config, error) {
 			BotNpub: viper.GetString("nostr.bot_npub"),
 		},
 		Lightning: LightningConfig{
-			LnurlPubkeyNpub: viper.GetString("lightning.lnurl_pubkey"),
+			LnurlPubkeyNpub:  viper.GetString("lightning.lnurl_pubkey"),
+			LightningAddress: viper.GetString("lightning.address"),
 		},
 		Pricing: PricingConfig{
 			SatsPerHalfDozen: viper.GetInt("pricing.sats_per_half_dozen"),
@@ -114,23 +116,13 @@ func LoadWithSecrets() (*Config, error) {
 	cfg.Nostr.BotSecretHex = secretHex
 	cfg.Nostr.BotPubkeyHex = pubkeyHex
 
-	// Derive LNURL provider pubkey hex if specified
-	if cfg.Lightning.LnurlPubkeyNpub != "" {
-		lnPrefix, lnValue, err := nip19.Decode(cfg.Lightning.LnurlPubkeyNpub)
-		if err != nil {
-			return nil, fmt.Errorf("invalid lightning.lnurl_pubkey: %w", err)
-		}
-		if lnPrefix != "npub" {
-			return nil, fmt.Errorf("lightning.lnurl_pubkey must be an npub, got %s", lnPrefix)
-		}
-		lnPubkeyHex, ok := lnValue.(string)
-		if !ok {
-			return nil, fmt.Errorf("failed to decode lnurl_pubkey npub value")
-		}
-		cfg.Lightning.LnurlPubkeyHex = lnPubkeyHex
+	// Derive BotNpub from pubkeyHex (for display purposes)
+	derivedNpub, err := nip19.EncodePublicKey(pubkeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("encoding bot npub: %w", err)
 	}
 
-	// Verify derived pubkey matches config if specified
+	// Verify derived pubkey matches config if specified, then always set BotNpub
 	if cfg.Nostr.BotNpub != "" {
 		configPrefix, configValue, err := nip19.Decode(cfg.Nostr.BotNpub)
 		if err != nil {
@@ -146,6 +138,24 @@ func LoadWithSecrets() (*Config, error) {
 		if configPubkeyHex != pubkeyHex {
 			return nil, fmt.Errorf("EGGBOT_NSEC does not match nostr.bot_npub in config")
 		}
+	} else {
+		cfg.Nostr.BotNpub = derivedNpub
+	}
+
+	// Derive LNURL provider pubkey hex if specified
+	if cfg.Lightning.LnurlPubkeyNpub != "" {
+		lnPrefix, lnValue, err := nip19.Decode(cfg.Lightning.LnurlPubkeyNpub)
+		if err != nil {
+			return nil, fmt.Errorf("invalid lightning.lnurl_pubkey: %w", err)
+		}
+		if lnPrefix != "npub" {
+			return nil, fmt.Errorf("lightning.lnurl_pubkey must be an npub, got %s", lnPrefix)
+		}
+		lnPubkeyHex, ok := lnValue.(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to decode lnurl_pubkey npub value")
+		}
+		cfg.Lightning.LnurlPubkeyHex = lnPubkeyHex
 	}
 
 	return cfg, nil

@@ -28,7 +28,7 @@ func ProcessZap(ctx context.Context, database *db.DB, zap *ValidatedZap) (*Proce
 		return &ProcessResult{
 			CustomerFound: false,
 			AmountSats:    zap.AmountSats,
-			Message:       fmt.Sprintf("Zap received from unknown sender %s...%s (%d sats) - not credited", zap.SenderNpub[:12], zap.SenderNpub[len(zap.SenderNpub)-4:], zap.AmountSats),
+			Message:       fmt.Sprintf("Zap received from unknown sender %s (%d sats) - not credited", zap.SenderNpub, zap.AmountSats),
 		}, nil
 	}
 	if err != nil {

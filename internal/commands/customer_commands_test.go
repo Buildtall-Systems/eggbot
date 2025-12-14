@@ -142,7 +142,7 @@ func TestOrderCmd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := OrderCmd(ctx, database, testCustomerNpub, tt.args, 3200)
+			result := OrderCmd(ctx, database, testCustomerNpub, tt.args, 3200, "")
 			if tt.wantErr {
 				if result.Error == nil {
 					t.Fatal("expected error, got nil")
@@ -170,7 +170,7 @@ func TestOrderCmd_InsufficientInventory(t *testing.T) {
 	_ = database.AddEggs(ctx, 5)
 	_, _ = database.CreateCustomer(ctx, testCustomerNpub)
 
-	result := OrderCmd(ctx, database, testCustomerNpub, []string{"10"}, 3200)
+	result := OrderCmd(ctx, database, testCustomerNpub, []string{"10"}, 3200, "")
 	if result.Error == nil {
 		t.Fatal("expected error for insufficient inventory")
 	}

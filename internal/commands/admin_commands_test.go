@@ -403,20 +403,3 @@ func TestRemoveCustomerCmd(t *testing.T) {
 	}
 }
 
-func TestShortenNpub(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"short", "short"},
-		// Using properly generated npub - last 4 chars are "8ejt"
-		{testCustomerNpub, "npub1rm9q804...8ejt"},
-	}
-
-	for _, tt := range tests {
-		result := shortenNpub(tt.input)
-		if result != tt.expected {
-			t.Errorf("shortenNpub(%q) = %q, want %q", tt.input, result, tt.expected)
-		}
-	}
-}

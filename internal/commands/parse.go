@@ -31,7 +31,9 @@ const (
 
 // Parse extracts a command from message content.
 // Returns nil if the message is empty or contains only whitespace.
+// Strips markdown comment prefixes that some clients (e.g. Amethyst) add.
 func Parse(content string) *Command {
+	content = stripMarkdownComments(content)
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil
@@ -46,6 +48,22 @@ func Parse(content string) *Command {
 		Name: strings.ToLower(parts[0]),
 		Args: parts[1:],
 	}
+}
+
+// stripMarkdownComments removes markdown reference-style link definitions
+// that some Nostr clients prepend to messages, e.g. "[//]: # (nip18)"
+func stripMarkdownComments(content string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip markdown comment lines: [//]: # (something) or [//]: ...
+		if strings.HasPrefix(trimmed, "[//]:") {
+			continue
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
 }
 
 // IsCustomerCommand returns true if the command is available to customers.

@@ -4,25 +4,19 @@ import (
 	"context"
 
 	"github.com/buildtall-systems/eggbot/internal/db"
-	"github.com/nbd-wtf/go-nostr/nip19"
 )
 
 // ExecuteConfig holds configuration needed for command execution.
 type ExecuteConfig struct {
 	SatsPerHalfDozen int
 	Admins           []string
+	LightningAddress string
 }
 
 // Execute runs the command and returns a result.
-// senderPubkeyHex is the sender's public key in hex format.
-func Execute(ctx context.Context, database *db.DB, cmd *Command, senderPubkeyHex string, cfg ExecuteConfig) Result {
-	// Convert hex pubkey to npub for database operations
-	senderNpub, err := nip19.EncodePublicKey(senderPubkeyHex)
-	if err != nil {
-		return Result{Error: err}
-	}
-
-	isAdmin := IsAdmin(senderPubkeyHex, cfg.Admins)
+// senderNpub is the sender's public key in npub format.
+func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub string, cfg ExecuteConfig) Result {
+	isAdmin := IsAdmin(senderNpub, cfg.Admins)
 
 	switch cmd.Name {
 	// Customer commands
@@ -30,7 +24,7 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderPubkeyHex
 		return InventoryCmd(ctx, database)
 
 	case CmdOrder:
-		return OrderCmd(ctx, database, senderNpub, cmd.Args, cfg.SatsPerHalfDozen)
+		return OrderCmd(ctx, database, senderNpub, cmd.Args, cfg.SatsPerHalfDozen, cfg.LightningAddress)
 
 	case CmdBalance:
 		return BalanceCmd(ctx, database, senderNpub)

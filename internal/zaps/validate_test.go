@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 )
 
 func TestExtractAmountFromBolt11(t *testing.T) {
@@ -225,8 +226,10 @@ func TestValidateZapReceipt_Valid(t *testing.T) {
 		t.Fatalf("ValidateZapReceipt() error = %v", err)
 	}
 
-	if result.SenderPubkeyHex != senderPubkey {
-		t.Errorf("SenderPubkeyHex = %s, want %s", result.SenderPubkeyHex, senderPubkey)
+	// Convert expected hex to npub for comparison
+	expectedNpub, _ := nip19.EncodePublicKey(senderPubkey)
+	if result.SenderNpub != expectedNpub {
+		t.Errorf("SenderNpub = %s, want %s", result.SenderNpub, expectedNpub)
 	}
 
 	if result.AmountSats != 1000 {

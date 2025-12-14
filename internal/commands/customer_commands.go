@@ -33,7 +33,7 @@ func InventoryCmd(ctx context.Context, database *db.DB) Result {
 
 // OrderCmd creates a new order for eggs.
 // Args: [quantity]
-func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []string, satsPerHalfDozen int) Result {
+func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []string, satsPerHalfDozen int, lightningAddress string) Result {
 	if len(args) < 1 {
 		return Result{Error: errors.New("usage: order <quantity>")}
 	}
@@ -68,7 +68,13 @@ func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []st
 		return Result{Error: fmt.Errorf("creating order: %w", err)}
 	}
 
-	return Result{Message: fmt.Sprintf("Order #%d created: %d eggs for %d sats. Send a zap to confirm!", order.ID, quantity, totalSats)}
+	msg := fmt.Sprintf("Order #%d created: %d eggs for %d sats.", order.ID, quantity, totalSats)
+	if lightningAddress != "" {
+		msg += fmt.Sprintf("\n\nPay to: %s", lightningAddress)
+	} else {
+		msg += "\n\nSend a zap to confirm!"
+	}
+	return Result{Message: msg}
 }
 
 // BalanceCmd returns the customer's balance (received payments minus spent on fulfilled orders).

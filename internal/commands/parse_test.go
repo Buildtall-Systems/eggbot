@@ -64,6 +64,29 @@ func TestParse(t *testing.T) {
 			wantName: "foobar",
 			wantArgs: []string{"arg1"},
 		},
+		{
+			name:     "strips markdown comment prefix (Amethyst nip18)",
+			input:    "[//]: # (nip18)\nadd 8",
+			wantName: "add",
+			wantArgs: []string{"8"},
+		},
+		{
+			name:     "strips multiple markdown comment lines",
+			input:    "[//]: # (nip18)\n[//]: # (something)\nhelp",
+			wantName: "help",
+			wantArgs: []string{},
+		},
+		{
+			name:     "markdown comment only returns nil",
+			input:    "[//]: # (nip18)",
+			wantNil:  true,
+		},
+		{
+			name:     "markdown comment with leading whitespace",
+			input:    "  [//]: # (nip18)\nbalance",
+			wantName: "balance",
+			wantArgs: []string{},
+		},
 	}
 
 	for _, tt := range tests {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/buildtall-systems/eggbot/internal/commands"
 	"github.com/buildtall-systems/eggbot/internal/config"
@@ -17,6 +18,8 @@ import (
 	"github.com/buildtall-systems/eggbot/internal/zaps"
 	gonostr "github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/keyer"
+	"github.com/nbd-wtf/go-nostr/nip04"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/nbd-wtf/go-nostr/nip59"
 	"github.com/spf13/cobra"
 )
@@ -40,7 +43,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Printf("eggbot starting...")
-	log.Printf("bot pubkey: %s", cfg.Nostr.BotPubkeyHex)
+	log.Printf("bot npub: %s", cfg.Nostr.BotNpub)
 	log.Printf("relays: %v", cfg.Nostr.Relays)
 	log.Printf("database: %s", cfg.Database.Path)
 
@@ -75,9 +78,19 @@ func runBot(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
+	// Get high water mark from database to filter old events
+	highWaterMark, err := database.GetHighWaterMark()
+	if err != nil {
+		return fmt.Errorf("getting high water mark: %w", err)
+	}
+	if highWaterMark > 0 {
+		hwmTime := time.Unix(highWaterMark, 0)
+		log.Printf("high water mark: %s", hwmTime.Format("2006/01/02 15:04:05"))
+	}
+
 	// Create and connect relay manager
 	relayMgr := nostr.NewRelayManager(cfg.Nostr.Relays, cfg.Nostr.BotPubkeyHex)
-	if err := relayMgr.Connect(ctx); err != nil {
+	if err := relayMgr.Connect(ctx, highWaterMark); err != nil {
 		return fmt.Errorf("connecting to relays: %w", err)
 	}
 	defer relayMgr.Close()
@@ -95,38 +108,76 @@ func runBot(cmd *cobra.Command, args []string) error {
 			if event == nil {
 				continue
 			}
-			log.Printf("received DM event: %s (kind:%d)", event.ID[:8], event.Kind)
+			log.Printf("received DM event: %s (kind:%d)", event.ID, event.Kind)
+			eventTs := int64(event.CreatedAt)
 
-			// Unwrap the gift-wrapped DM to get the rumor (actual message)
-			rumor, err := nip59.GiftUnwrap(*event, func(pubkey, ciphertext string) (string, error) {
-				return kr.Decrypt(ctx, ciphertext, pubkey)
-			})
-			if err != nil {
-				log.Printf("failed to unwrap DM: %v", err)
+			// Decrypt DM based on kind
+			var senderPubkey, messageContent string
+			var incomingProtocol dm.DMProtocol
+
+			switch event.Kind {
+			case gonostr.KindEncryptedDirectMessage: // NIP-04 legacy DM
+				incomingProtocol = dm.ProtocolNIP04
+				// Compute shared secret and decrypt
+				sharedSecret, err := nip04.ComputeSharedSecret(event.PubKey, cfg.Nostr.BotSecretHex)
+				if err != nil {
+					log.Printf("failed to compute shared secret: %v", err)
+					_ = database.SetHighWaterMark(eventTs)
+					continue
+				}
+				messageContent, err = nip04.Decrypt(event.Content, sharedSecret)
+				if err != nil {
+					log.Printf("failed to decrypt NIP-04 DM: %v", err)
+					_ = database.SetHighWaterMark(eventTs)
+					continue
+				}
+				senderPubkey = event.PubKey
+
+			case gonostr.KindGiftWrap: // NIP-17 gift-wrapped DM
+				incomingProtocol = dm.ProtocolNIP17
+				rumor, err := nip59.GiftUnwrap(*event, func(pubkey, ciphertext string) (string, error) {
+					return kr.Decrypt(ctx, ciphertext, pubkey)
+				})
+				if err != nil {
+					log.Printf("failed to unwrap DM: %v", err)
+					_ = database.SetHighWaterMark(eventTs)
+					continue
+				}
+				senderPubkey = rumor.PubKey
+				messageContent = rumor.Content
+
+			default:
+				log.Printf("unexpected DM kind: %d", event.Kind)
+				_ = database.SetHighWaterMark(eventTs)
 				continue
 			}
 
-			log.Printf("DM from %s: %s", rumor.PubKey[:8], rumor.Content)
+			// Convert sender hex pubkey to npub for display
+			senderNpub, _ := nip19.EncodePublicKey(senderPubkey)
+			log.Printf("DM from %s: %s", senderNpub, messageContent)
 
 			// Parse command from message
-			parsedCmd := commands.Parse(rumor.Content)
+			parsedCmd := commands.Parse(messageContent)
 			if parsedCmd == nil {
 				log.Printf("empty message, ignoring")
+				_ = database.SetHighWaterMark(eventTs)
 				continue
 			}
 
 			if !parsedCmd.IsValid() {
 				log.Printf("unknown command: %s", parsedCmd.Name)
-				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotPubkeyHex, rumor.PubKey,
-					fmt.Sprintf("Unknown command: %s. Send 'help' for available commands.", parsedCmd.Name))
+				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex, senderPubkey,
+					fmt.Sprintf("Unknown command: %s. Send 'help' for available commands.", parsedCmd.Name), incomingProtocol)
+				_ = database.SetHighWaterMark(eventTs)
 				continue
 			}
 
 			// Check permissions
-			if err := commands.CanExecute(ctx, database.DB, parsedCmd, rumor.PubKey, cfg.Admins); err != nil {
-				log.Printf("permission denied for %s: %v", rumor.PubKey[:8], err)
-				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotPubkeyHex, rumor.PubKey,
-					fmt.Sprintf("Permission denied: %v", err))
+			if err := commands.CanExecute(ctx, database.DB, parsedCmd, senderNpub, cfg.Admins); err != nil {
+				log.Printf("permission denied for %s: %v", senderNpub, err)
+				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex, senderPubkey,
+					fmt.Sprintf("Permission denied: %v", err), incomingProtocol)
+				_ = database.SetHighWaterMark(eventTs)
 				continue
 			}
 
@@ -136,8 +187,9 @@ func runBot(cmd *cobra.Command, args []string) error {
 			execCfg := commands.ExecuteConfig{
 				SatsPerHalfDozen: cfg.Pricing.SatsPerHalfDozen,
 				Admins:           cfg.Admins,
+				LightningAddress: cfg.Lightning.LightningAddress,
 			}
-			result := commands.Execute(ctx, database, parsedCmd, rumor.PubKey, execCfg)
+			result := commands.Execute(ctx, database, parsedCmd, senderNpub, execCfg)
 
 			// Send response via DM
 			var responseMsg string
@@ -148,13 +200,22 @@ func runBot(cmd *cobra.Command, args []string) error {
 				log.Printf("command result: %s", result.Message)
 				responseMsg = result.Message
 			}
-			sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotPubkeyHex, rumor.PubKey, responseMsg)
+			sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex, senderPubkey, responseMsg, incomingProtocol)
+
+			// Notify admins of new orders
+			if parsedCmd.Name == commands.CmdOrder && result.Error == nil {
+				adminMsg := fmt.Sprintf("📥 New order from %s:\n%s", senderNpub, result.Message)
+				notifyAdmins(ctx, kr, relayMgr, cfg, adminMsg)
+			}
+
+			_ = database.SetHighWaterMark(eventTs)
 
 		case event := <-relayMgr.ZapEvents():
 			if event == nil {
 				continue
 			}
-			log.Printf("received zap event: %s (kind:%d)", event.ID[:8], event.Kind)
+			log.Printf("received zap event: %s (kind:%d)", event.ID, event.Kind)
+			eventTs := int64(event.CreatedAt)
 
 			// Validate the zap receipt
 			validatedZap, err := zaps.ValidateZapReceipt(event, cfg.Lightning.LnurlPubkeyHex)
@@ -164,30 +225,59 @@ func runBot(cmd *cobra.Command, args []string) error {
 				} else {
 					log.Printf("invalid zap receipt: %v", err)
 				}
+				_ = database.SetHighWaterMark(eventTs)
 				continue
 			}
 
-			log.Printf("valid zap: %d sats from %s", validatedZap.AmountSats, validatedZap.SenderNpub[:16])
+			log.Printf("valid zap: %d sats from %s", validatedZap.AmountSats, validatedZap.SenderNpub)
 
 			// Process the zap
 			processResult, err := zaps.ProcessZap(ctx, database, validatedZap)
 			if err != nil {
 				if errors.Is(err, zaps.ErrDuplicateZap) {
-					log.Printf("duplicate zap event %s, ignoring", validatedZap.ZapEventID[:8])
+					log.Printf("duplicate zap event %s, ignoring", validatedZap.ZapEventID)
 				} else {
 					log.Printf("failed to process zap: %v", err)
 				}
+				_ = database.SetHighWaterMark(eventTs)
 				continue
 			}
 
 			log.Printf("zap processed: %s", processResult.Message)
+
+			// Send DM confirmation to zapper
+			_, senderPubkeyHex, err := nip19.Decode(validatedZap.SenderNpub)
+			if err != nil {
+				log.Printf("failed to decode sender npub: %v", err)
+			} else {
+				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
+					senderPubkeyHex.(string), processResult.Message, dm.ProtocolNIP04)
+			}
+
+			// Notify admins of payment received
+			adminMsg := fmt.Sprintf("💰 Payment received from %s:\n%s", validatedZap.SenderNpub, processResult.Message)
+			notifyAdmins(ctx, kr, relayMgr, cfg, adminMsg)
+
+			_ = database.SetHighWaterMark(eventTs)
 		}
 	}
 }
 
-// sendResponse wraps a message in NIP-17 gift wrap and publishes it to relays.
-func sendResponse(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayManager, botPubkeyHex, recipientPubkeyHex, message string) {
-	wrapped, err := dm.WrapResponse(ctx, kr, botPubkeyHex, recipientPubkeyHex, message)
+// sendResponse wraps a message in the appropriate protocol (NIP-04 or NIP-17) and publishes it to relays.
+func sendResponse(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayManager, botSecretHex, botPubkeyHex, recipientPubkeyHex, message string, protocol dm.DMProtocol) {
+	var wrapped *gonostr.Event
+	var err error
+
+	switch protocol {
+	case dm.ProtocolNIP04:
+		wrapped, err = dm.WrapLegacyResponse(ctx, kr, botSecretHex, botPubkeyHex, recipientPubkeyHex, message)
+	case dm.ProtocolNIP17:
+		wrapped, err = dm.WrapResponse(ctx, kr, botPubkeyHex, recipientPubkeyHex, message)
+	default:
+		// Default to NIP-17 for safety
+		wrapped, err = dm.WrapResponse(ctx, kr, botPubkeyHex, recipientPubkeyHex, message)
+	}
+
 	if err != nil {
 		log.Printf("failed to wrap response: %v", err)
 		return
@@ -198,5 +288,20 @@ func sendResponse(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayMa
 		return
 	}
 
-	log.Printf("sent response to %s", recipientPubkeyHex[:8])
+	// Convert hex to npub for display
+	recipientNpub, _ := nip19.EncodePublicKey(recipientPubkeyHex)
+	log.Printf("sent response to %s", recipientNpub)
+}
+
+// notifyAdmins sends a DM to all configured admins.
+func notifyAdmins(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayManager, cfg *config.Config, message string) {
+	for _, adminNpub := range cfg.Admins {
+		_, adminPubkeyHex, err := nip19.Decode(adminNpub)
+		if err != nil {
+			log.Printf("failed to decode admin npub %s: %v", adminNpub, err)
+			continue
+		}
+		sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
+			adminPubkeyHex.(string), message, dm.ProtocolNIP04)
+	}
 }

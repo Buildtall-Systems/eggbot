@@ -13,10 +13,9 @@ import (
 
 // ValidatedZap contains extracted information from a valid zap receipt.
 type ValidatedZap struct {
-	SenderPubkeyHex string // Hex pubkey of the zapper (from zap request)
-	SenderNpub      string // Npub of the zapper
-	AmountSats      int64  // Amount in sats (from bolt11)
-	ZapEventID      string // Event ID of the zap receipt
+	SenderNpub string // Npub of the zapper
+	AmountSats int64  // Amount in sats (from bolt11)
+	ZapEventID string // Event ID of the zap receipt
 }
 
 // ErrInvalidZapReceipt indicates the zap receipt is malformed or invalid.
@@ -42,7 +41,10 @@ func ValidateZapReceipt(event *nostr.Event, lnurlPubkeyHex string) (*ValidatedZa
 
 	// Verify zap provider if configured
 	if lnurlPubkeyHex != "" && event.PubKey != lnurlPubkeyHex {
-		return nil, fmt.Errorf("%w: expected %s, got %s", ErrUnauthorizedZapProvider, lnurlPubkeyHex[:16], event.PubKey[:16])
+		// Convert hex to npub for human-readable error message
+		expectedNpub, _ := nip19.EncodePublicKey(lnurlPubkeyHex)
+		gotNpub, _ := nip19.EncodePublicKey(event.PubKey)
+		return nil, fmt.Errorf("%w: expected %s, got %s", ErrUnauthorizedZapProvider, expectedNpub, gotNpub)
 	}
 
 	// Extract description tag (contains serialized zap request)
@@ -91,10 +93,9 @@ func ValidateZapReceipt(event *nostr.Event, lnurlPubkeyHex string) (*ValidatedZa
 	}
 
 	return &ValidatedZap{
-		SenderPubkeyHex: senderPubkeyHex,
-		SenderNpub:      senderNpub,
-		AmountSats:      amountSats,
-		ZapEventID:      event.ID,
+		SenderNpub: senderNpub,
+		AmountSats: amountSats,
+		ZapEventID: event.ID,
 	}, nil
 }
 

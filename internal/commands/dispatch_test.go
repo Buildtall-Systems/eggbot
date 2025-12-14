@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// Test keypairs are defined in customer_commands_test.go:
-// - testCustomerNpub, testCustomerPubkeyHex
-// - testAdminNpub, testAdminPubkeyHex
-// - testUnknownNpub, testUnknownPubkeyHex
+// Test npubs are defined in customer_commands_test.go:
+// - testCustomerNpub
+// - testAdminNpub
+// - testUnknownNpub
 
 func TestExecute(t *testing.T) {
 	ctx := context.Background()
@@ -27,77 +27,77 @@ func TestExecute(t *testing.T) {
 	tests := []struct {
 		name        string
 		cmd         *Command
-		pubkeyHex   string
+		npub        string
 		wantErr     bool
 		msgContains string
 	}{
 		{
 			name:        "inventory command",
 			cmd:         &Command{Name: CmdInventory, Args: []string{}},
-			pubkeyHex:   testCustomerPubkeyHex,
+			npub:        testCustomerNpub,
 			wantErr:     false,
 			msgContains: "eggs available",
 		},
 		{
 			name:        "help command customer",
 			cmd:         &Command{Name: CmdHelp, Args: []string{}},
-			pubkeyHex:   testCustomerPubkeyHex,
+			npub:        testCustomerNpub,
 			wantErr:     false,
 			msgContains: "Available commands",
 		},
 		{
 			name:        "help command admin",
 			cmd:         &Command{Name: CmdHelp, Args: []string{}},
-			pubkeyHex:   testAdminPubkeyHex,
+			npub:        testAdminNpub,
 			wantErr:     false,
 			msgContains: "Admin commands",
 		},
 		{
 			name:        "order command",
 			cmd:         &Command{Name: CmdOrder, Args: []string{"6"}},
-			pubkeyHex:   testCustomerPubkeyHex,
+			npub:        testCustomerNpub,
 			wantErr:     false,
 			msgContains: "Order #",
 		},
 		{
 			name:        "order command missing args",
 			cmd:         &Command{Name: CmdOrder, Args: []string{}},
-			pubkeyHex:   testCustomerPubkeyHex,
+			npub:        testCustomerNpub,
 			wantErr:     true,
 			msgContains: "",
 		},
 		{
 			name:        "balance command",
 			cmd:         &Command{Name: CmdBalance, Args: []string{}},
-			pubkeyHex:   testCustomerPubkeyHex,
+			npub:        testCustomerNpub,
 			wantErr:     false,
 			msgContains: "No payments received",
 		},
 		{
 			name:        "history command",
 			cmd:         &Command{Name: CmdHistory, Args: []string{}},
-			pubkeyHex:   testCustomerPubkeyHex,
+			npub:        testCustomerNpub,
 			wantErr:     false,
 			msgContains: "", // Could be "No orders" or orders list
 		},
 		{
 			name:        "add command (admin)",
 			cmd:         &Command{Name: CmdAdd, Args: []string{"5"}},
-			pubkeyHex:   testAdminPubkeyHex,
+			npub:        testAdminNpub,
 			wantErr:     false,
 			msgContains: "Added 5 eggs",
 		},
 		{
 			name:        "customers command (admin)",
 			cmd:         &Command{Name: CmdCustomers, Args: []string{}},
-			pubkeyHex:   testAdminPubkeyHex,
+			npub:        testAdminNpub,
 			wantErr:     false,
 			msgContains: "registered customers",
 		},
 		{
 			name:        "unknown command returns help",
 			cmd:         &Command{Name: "unknown", Args: []string{}},
-			pubkeyHex:   testCustomerPubkeyHex,
+			npub:        testCustomerNpub,
 			wantErr:     false,
 			msgContains: "Available commands",
 		},
@@ -105,7 +105,7 @@ func TestExecute(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := Execute(ctx, database, tt.cmd, tt.pubkeyHex, cfg)
+			result := Execute(ctx, database, tt.cmd, tt.npub, cfg)
 			if tt.wantErr {
 				if result.Error == nil {
 					t.Fatal("expected error")
@@ -155,7 +155,7 @@ func TestExecute_AllCommands(t *testing.T) {
 			}
 
 			cmd := &Command{Name: cmdName, Args: args}
-			result := Execute(ctx, database, cmd, testCustomerPubkeyHex, cfg)
+			result := Execute(ctx, database, cmd, testCustomerNpub, cfg)
 
 			// Just verify no panic and we get a response
 			if result.Message == "" && result.Error == nil {

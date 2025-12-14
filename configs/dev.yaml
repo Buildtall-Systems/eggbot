@@ -7,16 +7,20 @@ database:
 nostr:
   relays:
     - "wss://relay.damus.io"
+    - "wss://nos.lol"
+    - "wss://relay.nostr.band"
   bot_npub: "npub1srcs6w4mmkjdkm6n4dh69smakmauv09vxtfrap73gr8ampwzcc8sdutrts"
 
 lightning:
   # LNURL provider pubkey (npub of the Lightning service that signs zap receipts)
   # Leave empty to accept zaps from any provider (less secure)
   lnurl_pubkey: "" # e.g., "npub1..." for getalby or other LNURL provider
+  # Lightning address for customers to send payments
+  address: "" # e.g., "eggbot@getalby.com"
 
 pricing:
   sats_per_half_dozen: 3200
 
 # Admin npubs (can add inventory, view all orders)
 admins:
-  - "npub1..." # Replace with your admin npub
+  - "npub1mkq63wkt4v94cvq869njlwpszwpmf62c84p3sdvc2ptjy04jnzjs20r4tx"

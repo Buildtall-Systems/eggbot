@@ -135,7 +135,7 @@ func PaymentCmd(ctx context.Context, database *db.DB, args []string) Result {
 		return Result{Error: fmt.Errorf("recording payment: %w", err)}
 	}
 
-	return Result{Message: fmt.Sprintf("Recorded payment of %d sats for %s", amount, shortenNpub(npub))}
+	return Result{Message: fmt.Sprintf("Recorded payment of %d sats for %s", amount, npub)}
 }
 
 // AdjustCmd adjusts a customer's balance (can be negative).
@@ -178,9 +178,9 @@ func AdjustCmd(ctx context.Context, database *db.DB, args []string) Result {
 	}
 
 	if amount >= 0 {
-		return Result{Message: fmt.Sprintf("Added %d sats to %s", amount, shortenNpub(npub))}
+		return Result{Message: fmt.Sprintf("Added %d sats to %s", amount, npub)}
 	}
-	return Result{Message: fmt.Sprintf("Deducted %d sats from %s", -amount, shortenNpub(npub))}
+	return Result{Message: fmt.Sprintf("Deducted %d sats from %s", -amount, npub)}
 }
 
 // CustomersCmd lists all registered customers.
@@ -200,7 +200,7 @@ func CustomersCmd(ctx context.Context, database *db.DB) Result {
 		if c.Name.Valid && c.Name.String != "" {
 			name = fmt.Sprintf(" (%s)", c.Name.String)
 		}
-		msg += fmt.Sprintf("• %s%s\n", shortenNpub(c.Npub), name)
+		msg += fmt.Sprintf("• %s%s\n", c.Npub, name)
 	}
 	return Result{Message: msg}
 }
@@ -231,7 +231,7 @@ func AddCustomerCmd(ctx context.Context, database *db.DB, args []string) Result 
 		return Result{Error: fmt.Errorf("adding customer: %w", err)}
 	}
 
-	return Result{Message: fmt.Sprintf("Registered customer %s", shortenNpub(npub))}
+	return Result{Message: fmt.Sprintf("Registered customer %s", npub)}
 }
 
 // RemoveCustomerCmd removes a customer.
@@ -260,13 +260,6 @@ func RemoveCustomerCmd(ctx context.Context, database *db.DB, args []string) Resu
 		return Result{Error: fmt.Errorf("removing customer: %w", err)}
 	}
 
-	return Result{Message: fmt.Sprintf("Removed customer %s", shortenNpub(npub))}
+	return Result{Message: fmt.Sprintf("Removed customer %s", npub)}
 }
 
-// shortenNpub returns a shortened version of an npub for display.
-func shortenNpub(npub string) string {
-	if len(npub) < 20 {
-		return npub
-	}
-	return npub[:12] + "..." + npub[len(npub)-4:]
-}
