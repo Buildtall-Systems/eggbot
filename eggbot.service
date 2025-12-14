@@ -1,0 +1,46 @@
+[Unit]
+Description=Eggbot Nostr egg sales bot
+Documentation=https://github.com/Buildtall-Systems/eggbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=eggbot
+Group=eggbot
+
+# Working directory for SQLite database
+WorkingDirectory=/var/lib/eggbot
+
+# Load environment file with EGGBOT_NSEC
+EnvironmentFile=/etc/eggbot/eggbot.env
+
+# Start the bot with config file
+ExecStart=/usr/local/bin/eggbot run --config /etc/eggbot/config.yaml
+
+# Restart on failure with delay
+Restart=on-failure
+RestartSec=5
+
+# Graceful shutdown timeout
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+# Allow write to database directory
+ReadWritePaths=/var/lib/eggbot
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=eggbot
+
+[Install]
+WantedBy=multi-user.target

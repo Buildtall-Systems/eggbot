@@ -11,11 +11,12 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
-	Verbose  bool
-	Database DatabaseConfig
-	Nostr    NostrConfig
-	Pricing  PricingConfig
-	Admins   []string // npubs of admin users
+	Verbose   bool
+	Database  DatabaseConfig
+	Nostr     NostrConfig
+	Lightning LightningConfig
+	Pricing   PricingConfig
+	Admins    []string // npubs of admin users
 }
 
 // DatabaseConfig holds database settings.
@@ -29,6 +30,12 @@ type NostrConfig struct {
 	BotNpub       string // Bot's public key in npub format (from config)
 	BotSecretHex  string // Bot's secret key in hex (derived from EGGBOT_NSEC env)
 	BotPubkeyHex  string // Bot's public key in hex (derived from secret)
+}
+
+// LightningConfig holds Lightning payment settings.
+type LightningConfig struct {
+	LnurlPubkeyNpub string // LNURL provider's npub (from config)
+	LnurlPubkeyHex  string // Derived hex pubkey for zap validation
 }
 
 // PricingConfig holds egg pricing settings.
@@ -47,6 +54,9 @@ func Load() (*Config, error) {
 		Nostr: NostrConfig{
 			Relays:  viper.GetStringSlice("nostr.relays"),
 			BotNpub: viper.GetString("nostr.bot_npub"),
+		},
+		Lightning: LightningConfig{
+			LnurlPubkeyNpub: viper.GetString("lightning.lnurl_pubkey"),
 		},
 		Pricing: PricingConfig{
 			SatsPerHalfDozen: viper.GetInt("pricing.sats_per_half_dozen"),
@@ -103,6 +113,22 @@ func LoadWithSecrets() (*Config, error) {
 
 	cfg.Nostr.BotSecretHex = secretHex
 	cfg.Nostr.BotPubkeyHex = pubkeyHex
+
+	// Derive LNURL provider pubkey hex if specified
+	if cfg.Lightning.LnurlPubkeyNpub != "" {
+		lnPrefix, lnValue, err := nip19.Decode(cfg.Lightning.LnurlPubkeyNpub)
+		if err != nil {
+			return nil, fmt.Errorf("invalid lightning.lnurl_pubkey: %w", err)
+		}
+		if lnPrefix != "npub" {
+			return nil, fmt.Errorf("lightning.lnurl_pubkey must be an npub, got %s", lnPrefix)
+		}
+		lnPubkeyHex, ok := lnValue.(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to decode lnurl_pubkey npub value")
+		}
+		cfg.Lightning.LnurlPubkeyHex = lnPubkeyHex
+	}
 
 	// Verify derived pubkey matches config if specified
 	if cfg.Nostr.BotNpub != "" {

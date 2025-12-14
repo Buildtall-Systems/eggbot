@@ -9,6 +9,11 @@ nostr:
     - "wss://relay.damus.io"
   bot_npub: "npub1srcs6w4mmkjdkm6n4dh69smakmauv09vxtfrap73gr8ampwzcc8sdutrts"
 
+lightning:
+  # LNURL provider pubkey (npub of the Lightning service that signs zap receipts)
+  # Leave empty to accept zaps from any provider (less secure)
+  lnurl_pubkey: "" # e.g., "npub1..." for getalby or other LNURL provider
+
 pricing:
   sats_per_half_dozen: 3200
 
