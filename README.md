@@ -122,30 +122,127 @@ sudo systemctl daemon-reload
 
 ### NixOS
 
-Add to your NixOS configuration:
+1. Add eggbot to your flake inputs:
 
 ```nix
-# In flake.nix inputs
-eggbot.url = "github:Buildtall-Systems/eggbot";
-
-# In configuration.nix
-systemd.services.eggbot = {
-  description = "Eggbot Nostr egg sales bot";
-  after = [ "network-online.target" ];
-  wants = [ "network-online.target" ];
-  wantedBy = [ "multi-user.target" ];
-
-  serviceConfig = {
-    Type = "simple";
-    User = "eggbot";
-    Group = "eggbot";
-    ExecStart = "${pkgs.eggbot}/bin/eggbot run --config /etc/eggbot/config.yaml";
-    EnvironmentFile = "/etc/eggbot/eggbot.env";
-    WorkingDirectory = "/var/lib/eggbot";
-    Restart = "on-failure";
-    RestartSec = 5;
+# flake.nix
+{
+  inputs = {
+    eggbot.url = "git+ssh://git@github.com/Buildtall-Systems/eggbot.git";
+    # ... other inputs
   };
-};
+
+  outputs = { nixpkgs, eggbot, ... }: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      specialArgs = { inherit eggbot; };
+      modules = [ ./configuration.nix ];
+    };
+  };
+}
+```
+
+2. Create a module with service options (or add to existing module):
+
+```nix
+# eggbot-module.nix
+{ config, lib, pkgs, eggbot, ... }:
+
+let
+  cfg = config.services.eggbot;
+in
+{
+  options.services.eggbot = {
+    enable = lib.mkEnableOption "eggbot Nostr egg sales bot";
+
+    configFile = lib.mkOption {
+      type = lib.types.str;
+      default = "/etc/eggbot/config.yaml";
+      description = "Path to eggbot config file";
+    };
+
+    environmentFile = lib.mkOption {
+      type = lib.types.str;
+      default = "/etc/eggbot/eggbot.env";
+      description = "Environment file containing EGGBOT_NSEC";
+    };
+
+    dataDir = lib.mkOption {
+      type = lib.types.str;
+      default = "/var/lib/eggbot";
+      description = "Directory for eggbot data (database)";
+    };
+  };
+
+  config = lib.mkIf cfg.enable {
+    users.users.eggbot = {
+      isSystemUser = true;
+      group = "eggbot";
+      home = cfg.dataDir;
+      createHome = true;
+    };
+
+    users.groups.eggbot = {};
+
+    systemd.services.eggbot = {
+      description = "Eggbot Nostr egg sales bot";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+
+      serviceConfig = {
+        Type = "simple";
+        User = "eggbot";
+        Group = "eggbot";
+        ExecStart = "${eggbot.packages.${pkgs.system}.default}/bin/eggbot run --config ${cfg.configFile}";
+        EnvironmentFile = cfg.environmentFile;
+        WorkingDirectory = cfg.dataDir;
+        Restart = "on-failure";
+        RestartSec = "10s";
+
+        # Hardening
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        ReadWritePaths = [ cfg.dataDir ];
+        PrivateTmp = true;
+      };
+    };
+  };
+}
+```
+
+3. Enable in your configuration:
+
+```nix
+# configuration.nix
+{
+  services.eggbot.enable = true;
+}
+```
+
+4. Create config files (must be done manually after first deploy):
+
+```bash
+# Create config directory
+sudo mkdir -p /etc/eggbot
+
+# Create config file (see Configuration section above)
+sudo vim /etc/eggbot/config.yaml
+
+# Create env file with nsec
+sudo touch /etc/eggbot/eggbot.env
+sudo chmod 600 /etc/eggbot/eggbot.env
+echo "EGGBOT_NSEC=nsec1..." | sudo tee /etc/eggbot/eggbot.env
+
+# Make config readable by eggbot user
+sudo chown eggbot:eggbot /etc/eggbot/config.yaml
+```
+
+5. Rebuild and start:
+
+```bash
+sudo nixos-rebuild switch
+sudo systemctl status eggbot
 ```
 
 ## Running
