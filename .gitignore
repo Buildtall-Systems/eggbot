@@ -1,6 +1,5 @@
 bin/
 dist/
-vendor/
 *.db
 *.db-shm
 *.db-wal
