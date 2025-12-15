@@ -7,6 +7,6 @@ tmp/*
 !tmp/.gitkeep
 .env
 .env.local
-eggbot
+/eggbot
 result
 static/
