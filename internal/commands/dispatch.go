@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/buildtall-systems/eggbot/internal/db"
+	"github.com/buildtall-systems/eggbot/internal/lightning"
 )
 
 // ExecuteConfig holds configuration needed for command execution.
@@ -11,6 +12,8 @@ type ExecuteConfig struct {
 	SatsPerHalfDozen int
 	Admins           []string
 	LightningAddress string
+	BotNpub          string             // Bot's npub for payment links
+	LightningClient  *lightning.Client  // LNURL-pay client for invoice generation
 }
 
 // Execute runs the command and returns a result.
@@ -19,12 +22,12 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub stri
 	isAdmin := IsAdmin(senderNpub, cfg.Admins)
 
 	switch cmd.Name {
-	// Customer commands
+	// Customer commands (with admin subcommands)
 	case CmdInventory:
-		return InventoryCmd(ctx, database)
+		return InventoryCmd(ctx, database, cmd.Args, isAdmin)
 
 	case CmdOrder:
-		return OrderCmd(ctx, database, senderNpub, cmd.Args, cfg.SatsPerHalfDozen, cfg.LightningAddress)
+		return OrderCmd(ctx, database, senderNpub, cmd.Args, cfg.SatsPerHalfDozen, cfg.LightningAddress, cfg.BotNpub, cfg.LightningClient)
 
 	case CmdCancel:
 		return CancelOrderCmd(ctx, database, senderNpub, cmd.Args)
@@ -39,9 +42,6 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub stri
 		return HelpCmd(isAdmin)
 
 	// Admin commands
-	case CmdAdd:
-		return AddEggsCmd(ctx, database, cmd.Args)
-
 	case CmdDeliver:
 		return DeliverCmd(ctx, database, cmd.Args)
 
@@ -62,6 +62,9 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub stri
 
 	case CmdRemoveCustomer:
 		return RemoveCustomerCmd(ctx, database, cmd.Args)
+
+	case CmdSales:
+		return SalesCmd(ctx, database)
 
 	default:
 		return HelpCmd(isAdmin)

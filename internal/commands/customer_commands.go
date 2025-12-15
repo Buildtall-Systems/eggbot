@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 
 	"github.com/buildtall-systems/eggbot/internal/db"
+	"github.com/buildtall-systems/eggbot/internal/lightning"
 )
 
 // Result holds the response from a command execution.
@@ -15,8 +17,42 @@ type Result struct {
 	Error   error
 }
 
-// InventoryCmd returns the current egg inventory.
-func InventoryCmd(ctx context.Context, database *db.DB) Result {
+// InventoryCmd handles inventory commands.
+// No args: show inventory (all users)
+// add <n>: add eggs (admin only)
+// set <n>: set inventory (admin only)
+func InventoryCmd(ctx context.Context, database *db.DB, args []string, isAdmin bool) Result {
+	// No subcommand: show inventory
+	if len(args) == 0 {
+		return showInventory(ctx, database)
+	}
+
+	subcommand := args[0]
+
+	switch subcommand {
+	case "add":
+		if !isAdmin {
+			return Result{Error: errors.New("admin access required")}
+		}
+		return inventoryAdd(ctx, database, args[1:])
+
+	case "set":
+		if !isAdmin {
+			return Result{Error: errors.New("admin access required")}
+		}
+		return inventorySet(ctx, database, args[1:])
+
+	default:
+		// Unknown subcommand - show inventory for customers, error for attempted admin commands
+		if isAdmin {
+			return Result{Error: fmt.Errorf("unknown subcommand: %s (use add or set)", subcommand)}
+		}
+		return showInventory(ctx, database)
+	}
+}
+
+// showInventory returns the current egg count.
+func showInventory(ctx context.Context, database *db.DB) Result {
 	count, err := database.GetInventory(ctx)
 	if err != nil {
 		return Result{Error: fmt.Errorf("checking inventory: %w", err)}
@@ -31,11 +67,10 @@ func InventoryCmd(ctx context.Context, database *db.DB) Result {
 	return Result{Message: fmt.Sprintf("%d eggs available.", count)}
 }
 
-// OrderCmd creates a new order for eggs and reserves inventory atomically.
-// Args: [quantity]
-func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []string, satsPerHalfDozen int, lightningAddress string) Result {
+// inventoryAdd adds eggs to inventory.
+func inventoryAdd(ctx context.Context, database *db.DB, args []string) Result {
 	if len(args) < 1 {
-		return Result{Error: errors.New("usage: order <quantity>")}
+		return Result{Error: errors.New("usage: inventory add <quantity>")}
 	}
 
 	quantity, err := strconv.Atoi(args[0])
@@ -43,14 +78,70 @@ func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []st
 		return Result{Error: errors.New("quantity must be a positive number")}
 	}
 
-	// Get customer by npub (hex pubkey needs to be converted to npub first by caller)
+	if err := database.AddEggs(ctx, quantity); err != nil {
+		return Result{Error: fmt.Errorf("adding eggs: %w", err)}
+	}
+
+	total, err := database.GetInventory(ctx)
+	if err != nil {
+		return Result{Message: fmt.Sprintf("Added %d eggs.", quantity)}
+	}
+
+	return Result{Message: fmt.Sprintf("Added %d eggs. Total: %d", quantity, total)}
+}
+
+// inventorySet sets inventory to an exact count.
+func inventorySet(ctx context.Context, database *db.DB, args []string) Result {
+	if len(args) < 1 {
+		return Result{Error: errors.New("usage: inventory set <quantity>")}
+	}
+
+	quantity, err := strconv.Atoi(args[0])
+	if err != nil || quantity < 0 {
+		return Result{Error: errors.New("quantity must be a non-negative number")}
+	}
+
+	if err := database.SetInventory(ctx, quantity); err != nil {
+		return Result{Error: fmt.Errorf("setting inventory: %w", err)}
+	}
+
+	return Result{Message: fmt.Sprintf("Inventory set to %d eggs.", quantity)}
+}
+
+// OrderCmd creates a new order for eggs and reserves inventory atomically.
+// Args: [quantity] - must be 6 or 12 (half-dozen or dozen)
+func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []string, satsPerHalfDozen int, lightningAddress, botNpub string, lnClient *lightning.Client) Result {
+	if len(args) < 1 {
+		return Result{Error: errors.New("usage: order <quantity> (6 or 12)")}
+	}
+
+	quantity, err := strconv.Atoi(args[0])
+	if err != nil {
+		return Result{Error: errors.New("quantity must be 6 or 12")}
+	}
+
+	// Only allow multiples of 6, max 12
+	if quantity != 6 && quantity != 12 {
+		return Result{Error: errors.New("quantity must be 6 or 12")}
+	}
+
+	// Get customer by npub
 	customer, err := database.GetCustomerByNpub(ctx, senderNpub)
 	if err != nil {
 		return Result{Error: fmt.Errorf("looking up customer: %w", err)}
 	}
 
-	// Calculate price: satsPerHalfDozen per 6 eggs, rounded up
-	halfDozens := (quantity + 5) / 6 // Round up
+	// Check for pending orders
+	pending, err := database.GetPendingOrdersByCustomer(ctx, customer.ID)
+	if err != nil {
+		return Result{Error: fmt.Errorf("checking pending orders: %w", err)}
+	}
+	if len(pending) > 0 {
+		return Result{Error: fmt.Errorf("you have %d unpaid order(s) - please pay or cancel before ordering more", len(pending))}
+	}
+
+	// Calculate price
+	halfDozens := quantity / 6
 	totalSats := int64(halfDozens * satsPerHalfDozen)
 
 	// Create order (reserves inventory atomically)
@@ -64,12 +155,29 @@ func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []st
 		return Result{Error: fmt.Errorf("creating order: %w", err)}
 	}
 
-	msg := fmt.Sprintf("Order #%d: %d eggs reserved for %d sats.", order.ID, quantity, totalSats)
-	if lightningAddress != "" {
-		msg += fmt.Sprintf("\n\nPay to: %s", lightningAddress)
-	} else {
-		msg += "\n\nSend a zap to confirm!"
+	msg := fmt.Sprintf("Order %d: %d eggs reserved for %d sats.", order.ID, quantity, totalSats)
+
+	// Generate bolt11 invoice for clickable payment in Amethyst
+	var hasInvoice bool
+	if lnClient != nil && lightningAddress != "" {
+		invoice, err := lnClient.RequestInvoice(ctx, lightningAddress, totalSats)
+		if err != nil {
+			log.Printf("invoice generation failed: %v", err)
+		} else {
+			msg += fmt.Sprintf("\n\nPay invoice:\n%s", invoice)
+			hasInvoice = true
+		}
 	}
+
+	// Include zap instructions
+	if botNpub != "" {
+		if hasInvoice {
+			msg += fmt.Sprintf("\n\nOr zap this profile:\nnostr:%s", botNpub)
+		} else {
+			msg += fmt.Sprintf("\n\nZap this profile to pay:\nnostr:%s", botNpub)
+		}
+	}
+
 	return Result{Message: msg}
 }
 
@@ -95,7 +203,7 @@ func CancelOrderCmd(ctx context.Context, database *db.DB, senderNpub string, arg
 	order, err := database.GetOrderByID(ctx, orderID)
 	if err != nil {
 		if errors.Is(err, db.ErrOrderNotFound) {
-			return Result{Error: fmt.Errorf("order #%d not found", orderID)}
+			return Result{Error: fmt.Errorf("order %d not found", orderID)}
 		}
 		return Result{Error: fmt.Errorf("looking up order: %w", err)}
 	}
@@ -109,12 +217,12 @@ func CancelOrderCmd(ctx context.Context, database *db.DB, senderNpub string, arg
 	err = database.CancelOrder(ctx, orderID)
 	if err != nil {
 		if errors.Is(err, db.ErrOrderNotPending) {
-			return Result{Error: fmt.Errorf("order #%d cannot be cancelled (status: %s)", orderID, order.Status)}
+			return Result{Error: fmt.Errorf("order %d cannot be cancelled (status: %s)", orderID, order.Status)}
 		}
 		return Result{Error: fmt.Errorf("cancelling order: %w", err)}
 	}
 
-	return Result{Message: fmt.Sprintf("Order #%d cancelled.", orderID)}
+	return Result{Message: fmt.Sprintf("Order %d cancelled.", orderID)}
 }
 
 // BalanceCmd returns the customer's balance (received payments minus spent on fulfilled orders).
@@ -170,7 +278,7 @@ func HistoryCmd(ctx context.Context, database *db.DB, senderNpub string) Result 
 func HelpCmd(isAdmin bool) Result {
 	msg := `Available commands:
 • inventory - Check egg availability
-• order <qty> - Order eggs
+• order <6|12> - Order eggs (half-dozen or dozen)
 • cancel <order_id> - Cancel a pending order
 • balance - Check your payment balance
 • history - View recent orders
@@ -180,14 +288,16 @@ func HelpCmd(isAdmin bool) Result {
 		msg += `
 
 Admin commands:
-• add <qty> - Add eggs to inventory
+• inventory add <qty> - Add eggs to inventory
+• inventory set <qty> - Set inventory to exact count
 • deliver <npub> - Fulfill customer's paid orders
 • payment <npub> <sats> - Record manual payment
 • adjust <npub> <sats> - Adjust customer balance
 • orders - List all orders (all customers)
 • customers - List registered customers
 • addcustomer <npub> - Register new customer
-• removecustomer <npub> - Remove customer`
+• removecustomer <npub> - Remove customer
+• sales - Show total sales`
 	}
 
 	return Result{Message: msg}

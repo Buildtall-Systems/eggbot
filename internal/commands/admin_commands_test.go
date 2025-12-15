@@ -11,65 +11,6 @@ import (
 // - testAdminNpub, testAdminPubkeyHex
 // - testUnknownNpub, testUnknownPubkeyHex
 
-func TestAddEggsCmd(t *testing.T) {
-	ctx := context.Background()
-	database := setupCmdTestDB(t)
-
-	tests := []struct {
-		name        string
-		args        []string
-		wantErr     bool
-		errContains string
-		msgContains string
-	}{
-		{
-			name:        "no args",
-			args:        []string{},
-			wantErr:     true,
-			errContains: "usage",
-		},
-		{
-			name:        "invalid number",
-			args:        []string{"abc"},
-			wantErr:     true,
-			errContains: "positive number",
-		},
-		{
-			name:        "zero",
-			args:        []string{"0"},
-			wantErr:     true,
-			errContains: "positive number",
-		},
-		{
-			name:        "valid add",
-			args:        []string{"12"},
-			wantErr:     false,
-			msgContains: "Added 12 eggs",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := AddEggsCmd(ctx, database, tt.args)
-			if tt.wantErr {
-				if result.Error == nil {
-					t.Fatal("expected error")
-				}
-				if !strings.Contains(result.Error.Error(), tt.errContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errContains, result.Error.Error())
-				}
-			} else {
-				if result.Error != nil {
-					t.Fatalf("unexpected error: %v", result.Error)
-				}
-				if !strings.Contains(result.Message, tt.msgContains) {
-					t.Errorf("expected message containing %q, got %q", tt.msgContains, result.Message)
-				}
-			}
-		})
-	}
-}
-
 func TestDeliverCmd(t *testing.T) {
 	ctx := context.Background()
 	database := setupCmdTestDB(t)
@@ -513,6 +454,57 @@ func TestRemoveCustomerCmd(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSalesCmd(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	// No sales yet
+	result := SalesCmd(ctx, database)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if !strings.Contains(result.Message, "No sales yet") {
+		t.Errorf("expected no sales message, got %q", result.Message)
+	}
+
+	// Create customer and inventory
+	c, _ := database.CreateCustomer(ctx, testCustomerNpub)
+	_ = database.AddEggs(ctx, 50)
+
+	// Pending order should not count
+	_, _ = database.CreateOrder(ctx, c.ID, 6, 3200)
+	result = SalesCmd(ctx, database)
+	if !strings.Contains(result.Message, "No sales yet") {
+		t.Errorf("pending order should not count as sale, got %q", result.Message)
+	}
+
+	// Fulfilled order should count
+	order2, _ := database.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = database.UpdateOrderStatus(ctx, order2.ID, "paid")
+	_ = database.FulfillOrder(ctx, order2.ID)
+
+	result = SalesCmd(ctx, database)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if !strings.Contains(result.Message, "Total sales:") {
+		t.Errorf("expected total sales message, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "3200 sats") {
+		t.Errorf("expected 3200 sats, got %q", result.Message)
+	}
+
+	// Multiple fulfilled orders
+	order3, _ := database.CreateOrder(ctx, c.ID, 12, 6400)
+	_ = database.UpdateOrderStatus(ctx, order3.ID, "paid")
+	_ = database.FulfillOrder(ctx, order3.ID)
+
+	result = SalesCmd(ctx, database)
+	if !strings.Contains(result.Message, "9600 sats") {
+		t.Errorf("expected 9600 sats (3200+6400), got %q", result.Message)
 	}
 }
 

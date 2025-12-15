@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/buildtall-systems/eggbot/internal/config"
 	"github.com/buildtall-systems/eggbot/internal/db"
 	"github.com/buildtall-systems/eggbot/internal/dm"
+	"github.com/buildtall-systems/eggbot/internal/fsm"
+	"github.com/buildtall-systems/eggbot/internal/lightning"
 	"github.com/buildtall-systems/eggbot/internal/nostr"
 	"github.com/buildtall-systems/eggbot/internal/zaps"
 	gonostr "github.com/nbd-wtf/go-nostr"
@@ -97,6 +100,9 @@ func runBot(cmd *cobra.Command, args []string) error {
 
 	log.Printf("eggbot running, waiting for events...")
 
+	// Initialize event processor FSM
+	processorFSM := fsm.NewEventProcessorFSM()
+
 	// Main event loop
 	for {
 		select {
@@ -110,6 +116,13 @@ func runBot(cmd *cobra.Command, args []string) error {
 			}
 			log.Printf("received DM event: %s (kind:%d)", event.ID, event.Kind)
 			eventTs := int64(event.CreatedAt)
+
+			// Transition FSM to processing DM state
+			if err := processorFSM.Event(ctx, fsm.ProcessorEventDMReceived); err != nil {
+				log.Printf("FSM error on DM received: %v", err)
+				processorFSM.Reset()
+				continue
+			}
 
 			isNew, err := database.TryProcess(event.ID, event.Kind, eventTs)
 			if err != nil {
@@ -193,31 +206,58 @@ func runBot(cmd *cobra.Command, args []string) error {
 
 			log.Printf("executing command: %s %v", parsedCmd.Name, parsedCmd.Args)
 
+			// Transition FSM to command processed state
+			if err := processorFSM.Event(ctx, fsm.ProcessorEventCommandProcessed); err != nil {
+				log.Printf("FSM error on command processed: %v", err)
+				processorFSM.Reset()
+				_ = database.SetHighWaterMark(eventTs)
+				continue
+			}
+
 			// Execute the command
+			lnClient := lightning.NewClient()
 			execCfg := commands.ExecuteConfig{
 				SatsPerHalfDozen: cfg.Pricing.SatsPerHalfDozen,
 				Admins:           cfg.Admins,
 				LightningAddress: cfg.Lightning.LightningAddress,
+				BotNpub:          cfg.Nostr.BotNpub,
+				LightningClient:  lnClient,
 			}
 			result := commands.Execute(ctx, database, parsedCmd, senderNpub, execCfg)
 
-			// Send response via DM
-			var responseMsg string
+			// Check for errors and transition FSM if needed
 			if result.Error != nil {
+				if err := processorFSM.Event(ctx, fsm.ProcessorEventError); err != nil {
+					log.Printf("FSM error on command error: %v", err)
+				}
 				log.Printf("command error: %v", result.Error)
-				responseMsg = fmt.Sprintf("Error: %v", result.Error)
-			} else {
-				log.Printf("command result: %s", result.Message)
-				responseMsg = result.Message
+				responseMsg := fmt.Sprintf("Error: %v", result.Error)
+				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex, senderPubkey, responseMsg, incomingProtocol)
+				processorFSM.Reset()
+				_ = database.SetHighWaterMark(eventTs)
+				continue
 			}
-			sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex, senderPubkey, responseMsg, incomingProtocol)
 
-			// Notify admins of new orders
+			// Transition FSM to sending response state
+			if err := processorFSM.Event(ctx, fsm.ProcessorEventResponseSent); err != nil {
+				log.Printf("FSM error on response sent: %v", err)
+				processorFSM.Reset()
+				_ = database.SetHighWaterMark(eventTs)
+				continue
+			}
+
+			log.Printf("command result: %s", result.Message)
+			sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex, senderPubkey, result.Message, incomingProtocol)
+
+			// Notify admins of new orders (just the summary, not payment details)
 			if parsedCmd.Name == commands.CmdOrder && result.Error == nil {
-				adminMsg := fmt.Sprintf("📥 New order from %s:\n%s", senderNpub, result.Message)
+				orderSummary := strings.SplitN(result.Message, "\n", 2)[0]
+				adminMsg := fmt.Sprintf("📥 New order from %s:\n%s", senderNpub, orderSummary)
 				notifyAdmins(ctx, kr, relayMgr, cfg, adminMsg)
 			}
 
+			// Reset FSM to idle after DM processing completes
+			processorFSM.Reset()
 			_ = database.SetHighWaterMark(eventTs)
 
 		case event := <-relayMgr.ZapEvents():
@@ -226,6 +266,13 @@ func runBot(cmd *cobra.Command, args []string) error {
 			}
 			log.Printf("received zap event: %s (kind:%d)", event.ID, event.Kind)
 			eventTs := int64(event.CreatedAt)
+
+			// Transition FSM to processing zap state
+			if err := processorFSM.Event(ctx, fsm.ProcessorEventZapReceived); err != nil {
+				log.Printf("FSM error on zap received: %v", err)
+				processorFSM.Reset()
+				continue
+			}
 
 			isNew, err := database.TryProcess(event.ID, event.Kind, eventTs)
 			if err != nil {
@@ -258,7 +305,19 @@ func runBot(cmd *cobra.Command, args []string) error {
 					log.Printf("duplicate zap event %s, ignoring", validatedZap.ZapEventID)
 				} else {
 					log.Printf("failed to process zap: %v", err)
+					if err := processorFSM.Event(ctx, fsm.ProcessorEventError); err != nil {
+						log.Printf("FSM error on zap process error: %v", err)
+					}
 				}
+				processorFSM.Reset()
+				_ = database.SetHighWaterMark(eventTs)
+				continue
+			}
+
+			// Transition FSM to sending response state
+			if err := processorFSM.Event(ctx, fsm.ProcessorEventResponseSent); err != nil {
+				log.Printf("FSM error on response sent (zap): %v", err)
+				processorFSM.Reset()
 				_ = database.SetHighWaterMark(eventTs)
 				continue
 			}
@@ -278,6 +337,8 @@ func runBot(cmd *cobra.Command, args []string) error {
 			adminMsg := fmt.Sprintf("💰 Payment received from %s:\n%s", validatedZap.SenderNpub, processResult.Message)
 			notifyAdmins(ctx, kr, relayMgr, cfg, adminMsg)
 
+			// Reset FSM to idle after zap processing completes
+			processorFSM.Reset()
 			_ = database.SetHighWaterMark(eventTs)
 		}
 	}

@@ -6,7 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/buildtall-systems/eggbot/internal/fsm"
 )
+
+var orderSM = fsm.NewOrderStateMachine()
 
 // ErrInsufficientInventory indicates not enough eggs available.
 var ErrInsufficientInventory = errors.New("insufficient inventory")
@@ -22,6 +26,9 @@ var ErrCustomerExists = errors.New("customer already exists")
 
 // ErrOrderNotPending indicates the order cannot be modified because it's not pending.
 var ErrOrderNotPending = errors.New("order is not pending")
+
+// ErrInvalidStateTransition indicates an invalid order state transition was attempted.
+var ErrInvalidStateTransition = errors.New("invalid order state transition")
 
 // Customer represents a registered customer.
 type Customer struct {
@@ -82,6 +89,19 @@ func (db *DB) AddEggs(ctx context.Context, count int) error {
 	`, count)
 	if err != nil {
 		return fmt.Errorf("adding eggs: %w", err)
+	}
+	return nil
+}
+
+// SetInventory sets the inventory to an exact count.
+func (db *DB) SetInventory(ctx context.Context, count int) error {
+	_, err := db.ExecContext(ctx, `
+		UPDATE inventory
+		SET eggs_available = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1
+	`, count)
+	if err != nil {
+		return fmt.Errorf("setting inventory: %w", err)
 	}
 	return nil
 }
@@ -363,7 +383,7 @@ func (db *DB) GetPaidOrdersByCustomer(ctx context.Context, customerID int64) ([]
 
 // CancelOrder cancels a pending order and restores the reserved inventory.
 // Returns ErrOrderNotPending if the order is not in 'pending' status.
-// Only pending orders can be cancelled.
+// Only pending orders can be cancelled. Uses FSM validation.
 func (db *DB) CancelOrder(ctx context.Context, orderID int64) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -371,7 +391,6 @@ func (db *DB) CancelOrder(ctx context.Context, orderID int64) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Get order details
 	var quantity int
 	var status string
 	err = tx.QueryRowContext(ctx, `SELECT quantity, status FROM orders WHERE id = ?`, orderID).Scan(&quantity, &status)
@@ -382,11 +401,10 @@ func (db *DB) CancelOrder(ctx context.Context, orderID int64) error {
 		return fmt.Errorf("querying order: %w", err)
 	}
 
-	if status != "pending" {
+	if !orderSM.CanTransition(status, fsm.OrderEventCancel) {
 		return ErrOrderNotPending
 	}
 
-	// Restore inventory (eggs were reserved at order time)
 	_, err = tx.ExecContext(ctx, `
 		UPDATE inventory
 		SET eggs_available = eggs_available + ?, updated_at = CURRENT_TIMESTAMP
@@ -396,7 +414,6 @@ func (db *DB) CancelOrder(ctx context.Context, orderID int64) error {
 		return fmt.Errorf("restoring inventory: %w", err)
 	}
 
-	// Update order status
 	_, err = tx.ExecContext(ctx, `
 		UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?
 	`, orderID)
@@ -410,11 +427,26 @@ func (db *DB) CancelOrder(ctx context.Context, orderID int64) error {
 	return nil
 }
 
-// UpdateOrderStatus updates the status of an order.
-func (db *DB) UpdateOrderStatus(ctx context.Context, orderID int64, status string) error {
+// UpdateOrderStatus updates the status of an order with FSM validation.
+// Only valid state transitions are permitted.
+func (db *DB) UpdateOrderStatus(ctx context.Context, orderID int64, newStatus string) error {
+	order, err := db.GetOrderByID(ctx, orderID)
+	if err != nil {
+		return err
+	}
+
+	event := inferOrderEvent(order.Status, newStatus)
+	if event == "" {
+		return fmt.Errorf("%w: %s -> %s", ErrInvalidStateTransition, order.Status, newStatus)
+	}
+
+	if _, err := orderSM.Transition(ctx, order.Status, event); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidStateTransition, err)
+	}
+
 	result, err := db.ExecContext(ctx, `
 		UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-	`, status, orderID)
+	`, newStatus, orderID)
 	if err != nil {
 		return fmt.Errorf("updating order status: %w", err)
 	}
@@ -429,26 +461,38 @@ func (db *DB) UpdateOrderStatus(ctx context.Context, orderID int64, status strin
 	return nil
 }
 
+func inferOrderEvent(from, to string) string {
+	transitions := map[string]map[string]string{
+		fsm.OrderStatePending: {
+			fsm.OrderStatePaid:      fsm.OrderEventPay,
+			fsm.OrderStateCancelled: fsm.OrderEventCancel,
+		},
+		fsm.OrderStatePaid: {
+			fsm.OrderStateFulfilled: fsm.OrderEventFulfill,
+		},
+	}
+	if events, ok := transitions[from]; ok {
+		return events[to]
+	}
+	return ""
+}
+
 // FulfillOrder marks an order as fulfilled. Inventory was already reserved at order time,
-// so no inventory deduction occurs here.
+// so no inventory deduction occurs here. Uses FSM validation and atomic WHERE clause
+// to prevent race conditions.
 func (db *DB) FulfillOrder(ctx context.Context, orderID int64) error {
-	// Get order details
-	var status string
-	err := db.QueryRowContext(ctx, `SELECT status FROM orders WHERE id = ?`, orderID).Scan(&status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrOrderNotFound
-	}
+	order, err := db.GetOrderByID(ctx, orderID)
 	if err != nil {
-		return fmt.Errorf("querying order: %w", err)
+		return err
 	}
 
-	if status == "fulfilled" {
-		return fmt.Errorf("order already fulfilled")
+	if !orderSM.CanTransition(order.Status, fsm.OrderEventFulfill) {
+		return fmt.Errorf("%w: cannot fulfill order in %s state", ErrInvalidStateTransition, order.Status)
 	}
 
-	// Update order status (inventory was already deducted at order time)
 	result, err := db.ExecContext(ctx, `
-		UPDATE orders SET status = 'fulfilled', updated_at = CURRENT_TIMESTAMP WHERE id = ?
+		UPDATE orders SET status = 'fulfilled', updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'paid'
 	`, orderID)
 	if err != nil {
 		return fmt.Errorf("updating order: %w", err)
@@ -459,7 +503,7 @@ func (db *DB) FulfillOrder(ctx context.Context, orderID int64) error {
 		return fmt.Errorf("checking rows affected: %w", err)
 	}
 	if rows == 0 {
-		return ErrOrderNotFound
+		return fmt.Errorf("%w: order state changed concurrently", ErrInvalidStateTransition)
 	}
 	return nil
 }
@@ -521,6 +565,21 @@ func (db *DB) GetCustomerSpent(ctx context.Context, customerID int64) (int64, er
 		return 0, nil
 	}
 	return spent.Int64, nil
+}
+
+// GetTotalSales returns total sats from all fulfilled orders.
+func (db *DB) GetTotalSales(ctx context.Context) (int64, error) {
+	var total sql.NullInt64
+	err := db.QueryRowContext(ctx, `
+		SELECT SUM(total_sats) FROM orders WHERE status = 'fulfilled'
+	`).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("querying total sales: %w", err)
+	}
+	if !total.Valid {
+		return 0, nil
+	}
+	return total.Int64, nil
 }
 
 // isUniqueViolation checks if the error is a unique constraint violation.

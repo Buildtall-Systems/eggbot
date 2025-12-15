@@ -66,9 +66,9 @@ func TestParse(t *testing.T) {
 		},
 		{
 			name:     "strips markdown comment prefix (Amethyst nip18)",
-			input:    "[//]: # (nip18)\nadd 8",
-			wantName: "add",
-			wantArgs: []string{"8"},
+			input:    "[//]: # (nip18)\ninventory add 8",
+			wantName: "inventory",
+			wantArgs: []string{"add", "8"},
 		},
 		{
 			name:     "strips multiple markdown comment lines",
@@ -123,7 +123,7 @@ func TestParse(t *testing.T) {
 
 func TestCommand_IsCustomerCommand(t *testing.T) {
 	customerCmds := []string{CmdInventory, CmdOrder, CmdBalance, CmdHistory, CmdHelp}
-	adminCmds := []string{CmdAdd, CmdDeliver, CmdPayment, CmdAdjust, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer}
+	adminCmds := []string{CmdDeliver, CmdPayment, CmdAdjust, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer}
 
 	for _, name := range customerCmds {
 		cmd := &Command{Name: name}
@@ -142,7 +142,7 @@ func TestCommand_IsCustomerCommand(t *testing.T) {
 
 func TestCommand_IsAdminCommand(t *testing.T) {
 	customerCmds := []string{CmdInventory, CmdOrder, CmdBalance, CmdHistory, CmdHelp}
-	adminCmds := []string{CmdAdd, CmdDeliver, CmdPayment, CmdAdjust, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer}
+	adminCmds := []string{CmdDeliver, CmdPayment, CmdAdjust, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer}
 
 	for _, name := range adminCmds {
 		cmd := &Command{Name: name}
@@ -162,7 +162,7 @@ func TestCommand_IsAdminCommand(t *testing.T) {
 func TestCommand_IsValid(t *testing.T) {
 	validCmds := []string{
 		CmdInventory, CmdOrder, CmdBalance, CmdHistory, CmdHelp,
-		CmdAdd, CmdDeliver, CmdPayment, CmdAdjust, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer,
+		CmdDeliver, CmdPayment, CmdAdjust, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer,
 	}
 
 	for _, name := range validCmds {

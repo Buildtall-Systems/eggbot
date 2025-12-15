@@ -159,7 +159,7 @@ func TestCanExecute(t *testing.T) {
 		},
 		{
 			name:    "admin can execute admin command",
-			cmd:     &Command{Name: CmdAdd},
+			cmd:     &Command{Name: CmdDeliver},
 			npub:    adminNpub,
 			wantErr: false,
 		},
@@ -171,7 +171,7 @@ func TestCanExecute(t *testing.T) {
 		},
 		{
 			name:    "customer cannot execute admin command",
-			cmd:     &Command{Name: CmdAdd},
+			cmd:     &Command{Name: CmdDeliver},
 			npub:    customerNpub,
 			wantErr: true,
 		},
@@ -183,7 +183,7 @@ func TestCanExecute(t *testing.T) {
 		},
 		{
 			name:    "unknown user cannot execute admin command",
-			cmd:     &Command{Name: CmdAdd},
+			cmd:     &Command{Name: CmdDeliver},
 			npub:    unknownNpub,
 			wantErr: true,
 		},

@@ -11,31 +11,6 @@ import (
 	"github.com/nbd-wtf/go-nostr/nip19"
 )
 
-// AddEggsCmd adds eggs to inventory.
-// Args: [quantity]
-func AddEggsCmd(ctx context.Context, database *db.DB, args []string) Result {
-	if len(args) < 1 {
-		return Result{Error: errors.New("usage: add <quantity>")}
-	}
-
-	quantity, err := strconv.Atoi(args[0])
-	if err != nil || quantity < 1 {
-		return Result{Error: errors.New("quantity must be a positive number")}
-	}
-
-	if err := database.AddEggs(ctx, quantity); err != nil {
-		return Result{Error: fmt.Errorf("adding eggs: %w", err)}
-	}
-
-	// Get new total
-	total, err := database.GetInventory(ctx)
-	if err != nil {
-		return Result{Message: fmt.Sprintf("Added %d eggs.", quantity)}
-	}
-
-	return Result{Message: fmt.Sprintf("Added %d eggs. Total: %d", quantity, total)}
-}
-
 // DeliverCmd fulfills paid orders for a customer.
 // Args: [npub]
 // Only orders with status='paid' can be delivered. Pending (unpaid) orders are skipped.
@@ -286,5 +261,19 @@ func RemoveCustomerCmd(ctx context.Context, database *db.DB, args []string) Resu
 	}
 
 	return Result{Message: fmt.Sprintf("Removed customer %s", npub)}
+}
+
+// SalesCmd returns total sales from fulfilled orders.
+func SalesCmd(ctx context.Context, database *db.DB) Result {
+	total, err := database.GetTotalSales(ctx)
+	if err != nil {
+		return Result{Error: fmt.Errorf("getting total sales: %w", err)}
+	}
+
+	if total == 0 {
+		return Result{Message: "No sales yet."}
+	}
+
+	return Result{Message: fmt.Sprintf("Total sales: %d sats", total)}
 }
 

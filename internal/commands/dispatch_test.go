@@ -57,7 +57,7 @@ func TestExecute(t *testing.T) {
 			cmd:         &Command{Name: CmdOrder, Args: []string{"6"}},
 			npub:        testCustomerNpub,
 			wantErr:     false,
-			msgContains: "Order #",
+			msgContains: "Order ",
 		},
 		{
 			name:        "order command missing args",
@@ -81,8 +81,8 @@ func TestExecute(t *testing.T) {
 			msgContains: "", // Could be "No orders" or orders list
 		},
 		{
-			name:        "add command (admin)",
-			cmd:         &Command{Name: CmdAdd, Args: []string{"5"}},
+			name:        "inventory add command (admin)",
+			cmd:         &Command{Name: CmdInventory, Args: []string{"add", "5"}},
 			npub:        testAdminNpub,
 			wantErr:     false,
 			msgContains: "Added 5 eggs",
@@ -137,7 +137,7 @@ func TestExecute_AllCommands(t *testing.T) {
 
 	commands := []string{
 		CmdInventory, CmdOrder, CmdBalance, CmdHistory, CmdHelp,
-		CmdAdd, CmdDeliver, CmdPayment, CmdAdjust,
+		CmdDeliver, CmdPayment, CmdAdjust,
 		CmdCustomers, CmdAddCustomer, CmdRemoveCustomer,
 	}
 
@@ -146,7 +146,7 @@ func TestExecute_AllCommands(t *testing.T) {
 			// Create command with minimal valid args where needed
 			args := []string{}
 			switch cmdName {
-			case CmdOrder, CmdAdd:
+			case CmdOrder:
 				args = []string{"1"}
 			case CmdDeliver, CmdAddCustomer, CmdRemoveCustomer:
 				args = []string{testCustomerNpub}

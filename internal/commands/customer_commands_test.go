@@ -50,7 +50,7 @@ const (
 	testUnknownNpub      = "npub1mna04t4lvslqepghuj0p8tf9cc8wfft6pd04l3qp4k7tn5237h6sj6ru9w"
 )
 
-func TestInventoryCmd(t *testing.T) {
+func TestInventoryCmd_Show(t *testing.T) {
 	ctx := context.Background()
 	database := setupCmdTestDB(t)
 
@@ -83,7 +83,8 @@ func TestInventoryCmd(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.setup()
-			result := InventoryCmd(ctx, database)
+			// Test without args (show inventory) - works for both admin and non-admin
+			result := InventoryCmd(ctx, database, []string{}, false)
 			if result.Error != nil {
 				t.Fatalf("unexpected error: %v", result.Error)
 			}
@@ -94,18 +95,201 @@ func TestInventoryCmd(t *testing.T) {
 	}
 }
 
+func TestInventoryCmd_Add(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	tests := []struct {
+		name        string
+		args        []string
+		isAdmin     bool
+		wantErr     bool
+		errContains string
+		msgContains string
+	}{
+		{
+			name:        "non-admin denied",
+			args:        []string{"add", "10"},
+			isAdmin:     false,
+			wantErr:     true,
+			errContains: "admin access required",
+		},
+		{
+			name:        "admin no quantity",
+			args:        []string{"add"},
+			isAdmin:     true,
+			wantErr:     true,
+			errContains: "usage",
+		},
+		{
+			name:        "admin invalid number",
+			args:        []string{"add", "abc"},
+			isAdmin:     true,
+			wantErr:     true,
+			errContains: "positive number",
+		},
+		{
+			name:        "admin zero",
+			args:        []string{"add", "0"},
+			isAdmin:     true,
+			wantErr:     true,
+			errContains: "positive number",
+		},
+		{
+			name:        "admin valid add",
+			args:        []string{"add", "12"},
+			isAdmin:     true,
+			wantErr:     false,
+			msgContains: "Added 12 eggs",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := InventoryCmd(ctx, database, tt.args, tt.isAdmin)
+			if tt.wantErr {
+				if result.Error == nil {
+					t.Fatal("expected error")
+				}
+				if !strings.Contains(result.Error.Error(), tt.errContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errContains, result.Error.Error())
+				}
+			} else {
+				if result.Error != nil {
+					t.Fatalf("unexpected error: %v", result.Error)
+				}
+				if !strings.Contains(result.Message, tt.msgContains) {
+					t.Errorf("expected message containing %q, got %q", tt.msgContains, result.Message)
+				}
+			}
+		})
+	}
+}
+
+func TestInventoryCmd_Set(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	// Start with some eggs
+	_ = database.AddEggs(ctx, 50)
+
+	tests := []struct {
+		name        string
+		args        []string
+		isAdmin     bool
+		wantErr     bool
+		errContains string
+		msgContains string
+	}{
+		{
+			name:        "non-admin denied",
+			args:        []string{"set", "10"},
+			isAdmin:     false,
+			wantErr:     true,
+			errContains: "admin access required",
+		},
+		{
+			name:        "admin no quantity",
+			args:        []string{"set"},
+			isAdmin:     true,
+			wantErr:     true,
+			errContains: "usage",
+		},
+		{
+			name:        "admin invalid number",
+			args:        []string{"set", "abc"},
+			isAdmin:     true,
+			wantErr:     true,
+			errContains: "non-negative number",
+		},
+		{
+			name:        "admin negative",
+			args:        []string{"set", "-5"},
+			isAdmin:     true,
+			wantErr:     true,
+			errContains: "non-negative number",
+		},
+		{
+			name:        "admin set to zero",
+			args:        []string{"set", "0"},
+			isAdmin:     true,
+			wantErr:     false,
+			msgContains: "Inventory set to 0 eggs",
+		},
+		{
+			name:        "admin set to 25",
+			args:        []string{"set", "25"},
+			isAdmin:     true,
+			wantErr:     false,
+			msgContains: "Inventory set to 25 eggs",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := InventoryCmd(ctx, database, tt.args, tt.isAdmin)
+			if tt.wantErr {
+				if result.Error == nil {
+					t.Fatal("expected error")
+				}
+				if !strings.Contains(result.Error.Error(), tt.errContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errContains, result.Error.Error())
+				}
+			} else {
+				if result.Error != nil {
+					t.Fatalf("unexpected error: %v", result.Error)
+				}
+				if !strings.Contains(result.Message, tt.msgContains) {
+					t.Errorf("expected message containing %q, got %q", tt.msgContains, result.Message)
+				}
+			}
+		})
+	}
+
+	// Verify final state
+	count, _ := database.GetInventory(ctx)
+	if count != 25 {
+		t.Errorf("expected final inventory 25, got %d", count)
+	}
+}
+
+func TestInventoryCmd_UnknownSubcommand(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+	_ = database.AddEggs(ctx, 10)
+
+	// Non-admin with unknown subcommand gets inventory shown
+	result := InventoryCmd(ctx, database, []string{"foobar"}, false)
+	if result.Error != nil {
+		t.Fatalf("expected no error for non-admin, got %v", result.Error)
+	}
+	if !strings.Contains(result.Message, "10 eggs available") {
+		t.Errorf("expected inventory message, got %q", result.Message)
+	}
+
+	// Admin with unknown subcommand gets error
+	result = InventoryCmd(ctx, database, []string{"foobar"}, true)
+	if result.Error == nil {
+		t.Fatal("expected error for admin with unknown subcommand")
+	}
+	if !strings.Contains(result.Error.Error(), "unknown subcommand") {
+		t.Errorf("expected unknown subcommand error, got %q", result.Error.Error())
+	}
+}
+
 func TestOrderCmd(t *testing.T) {
 	ctx := context.Background()
 	database := setupCmdTestDB(t)
 
 	// Setup: add inventory and customer using properly generated keypair
-	_ = database.AddEggs(ctx, 20)
+	_ = database.AddEggs(ctx, 50)
 	_, _ = database.CreateCustomer(ctx, testCustomerNpub)
 
 	tests := []struct {
-		name      string
-		args      []string
-		wantErr   bool
+		name        string
+		args        []string
+		setup       func() // cancel any pending orders
+		wantErr     bool
 		errContains string
 		msgContains string
 	}{
@@ -116,34 +300,53 @@ func TestOrderCmd(t *testing.T) {
 			errContains: "usage",
 		},
 		{
-			name:        "invalid quantity",
+			name:        "invalid quantity string",
 			args:        []string{"abc"},
 			wantErr:     true,
-			errContains: "positive number",
+			errContains: "6 or 12",
 		},
 		{
 			name:        "zero quantity",
 			args:        []string{"0"},
 			wantErr:     true,
-			errContains: "positive number",
+			errContains: "6 or 12",
+		},
+		{
+			name:        "quantity 1 rejected",
+			args:        []string{"1"},
+			wantErr:     true,
+			errContains: "6 or 12",
+		},
+		{
+			name:        "quantity 7 rejected",
+			args:        []string{"7"},
+			wantErr:     true,
+			errContains: "6 or 12",
+		},
+		{
+			name:        "quantity 18 rejected (over max)",
+			args:        []string{"18"},
+			wantErr:     true,
+			errContains: "6 or 12",
 		},
 		{
 			name:        "valid order 6 eggs",
 			args:        []string{"6"},
 			wantErr:     false,
-			msgContains: "eggs reserved",
-		},
-		{
-			name:        "valid order 7 eggs rounds up",
-			args:        []string{"7"},
-			wantErr:     false,
-			msgContains: "6400 sats", // 2 half-dozens
+			msgContains: "6 eggs reserved",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := OrderCmd(ctx, database, testCustomerNpub, tt.args, 3200, "")
+			// Cancel any pending orders from previous test
+			c, _ := database.GetCustomerByNpub(ctx, testCustomerNpub)
+			pending, _ := database.GetPendingOrdersByCustomer(ctx, c.ID)
+			for _, o := range pending {
+				_ = database.CancelOrder(ctx, o.ID)
+			}
+
+			result := OrderCmd(ctx, database, testCustomerNpub, tt.args, 3200, "", "", nil)
 			if tt.wantErr {
 				if result.Error == nil {
 					t.Fatal("expected error, got nil")
@@ -163,15 +366,67 @@ func TestOrderCmd(t *testing.T) {
 	}
 }
 
+func TestOrderCmd_ValidDozen(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	_ = database.AddEggs(ctx, 20)
+	_, _ = database.CreateCustomer(ctx, testCustomerNpub)
+
+	result := OrderCmd(ctx, database, testCustomerNpub, []string{"12"}, 3200, "", "", nil)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if !strings.Contains(result.Message, "12 eggs reserved") {
+		t.Errorf("expected 12 eggs reserved, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "6400 sats") {
+		t.Errorf("expected 6400 sats (2 half-dozens), got %q", result.Message)
+	}
+}
+
+func TestOrderCmd_PendingOrderBlocks(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	_ = database.AddEggs(ctx, 50)
+	c, _ := database.CreateCustomer(ctx, testCustomerNpub)
+
+	// First order succeeds
+	result := OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", "", nil)
+	if result.Error != nil {
+		t.Fatalf("first order failed: %v", result.Error)
+	}
+
+	// Second order blocked due to pending
+	result = OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", "", nil)
+	if result.Error == nil {
+		t.Fatal("expected error for second order with pending")
+	}
+	if !strings.Contains(result.Error.Error(), "unpaid order") {
+		t.Errorf("expected unpaid order error, got %q", result.Error.Error())
+	}
+
+	// Cancel the pending order
+	pending, _ := database.GetPendingOrdersByCustomer(ctx, c.ID)
+	_ = database.CancelOrder(ctx, pending[0].ID)
+
+	// Now ordering works again
+	result = OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", "", nil)
+	if result.Error != nil {
+		t.Fatalf("order after cancel failed: %v", result.Error)
+	}
+}
+
 func TestOrderCmd_InsufficientInventory(t *testing.T) {
 	ctx := context.Background()
 	database := setupCmdTestDB(t)
 
-	// Setup: only 5 eggs, customer orders 10
+	// Setup: only 5 eggs, customer orders 6
 	_ = database.AddEggs(ctx, 5)
 	_, _ = database.CreateCustomer(ctx, testCustomerNpub)
 
-	result := OrderCmd(ctx, database, testCustomerNpub, []string{"10"}, 3200, "")
+	result := OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", "", nil)
 	if result.Error == nil {
 		t.Fatal("expected error for insufficient inventory")
 	}
@@ -206,9 +461,10 @@ func TestBalanceCmd(t *testing.T) {
 		t.Errorf("expected 5000 sats received, got %q", result.Message)
 	}
 
-	// Fulfill an order to test spent
+	// Create, pay, and fulfill an order to test spent
 	_ = database.AddEggs(ctx, 10)
 	order, _ := database.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = database.UpdateOrderStatus(ctx, order.ID, "paid")
 	_ = database.FulfillOrder(ctx, order.ID)
 
 	result = BalanceCmd(ctx, database, testCustomerNpub)

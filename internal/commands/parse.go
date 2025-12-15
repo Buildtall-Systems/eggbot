@@ -21,7 +21,6 @@ const (
 	CmdHelp      = "help"
 
 	// Admin commands
-	CmdAdd            = "add"
 	CmdDeliver        = "deliver"
 	CmdPayment        = "payment"
 	CmdAdjust         = "adjust"
@@ -29,6 +28,7 @@ const (
 	CmdCustomers      = "customers"
 	CmdAddCustomer    = "addcustomer"
 	CmdRemoveCustomer = "removecustomer"
+	CmdSales          = "sales"
 )
 
 // Parse extracts a command from message content.
@@ -81,7 +81,7 @@ func (c *Command) IsCustomerCommand() bool {
 // IsAdminCommand returns true if the command requires admin privileges.
 func (c *Command) IsAdminCommand() bool {
 	switch c.Name {
-	case CmdAdd, CmdDeliver, CmdPayment, CmdAdjust, CmdOrders, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer:
+	case CmdDeliver, CmdPayment, CmdAdjust, CmdOrders, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer, CmdSales:
 		return true
 	default:
 		return false

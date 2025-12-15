@@ -9,6 +9,7 @@ Eggbot is a Nostr bot that operates via NIP-17 encrypted direct messages. Custom
 **Features**:
 - Encrypted DM communication (NIP-17 gift wrap)
 - Lightning zap payment acceptance (NIP-57)
+- Bolt11 invoice generation via LNURL-pay (clickable in Amethyst)
 - SQLite database for inventory, orders, and transactions
 - Customer whitelist for access control
 - Admin commands for inventory and order management
@@ -44,6 +45,9 @@ lightning:
   # LNURL provider pubkey that signs zap receipts
   # Leave empty to accept zaps from any provider (less secure)
   lnurl_pubkey: "npub1..."  # e.g., getalby's npub
+  # Lightning address for invoice generation (optional)
+  # If set, order confirmations include a clickable bolt11 invoice
+  address: "eggbot@getalby.com"
 
 pricing:
   sats_per_half_dozen: 3200
@@ -181,7 +185,8 @@ Any registered customer can use:
 | Command | Description |
 |---------|-------------|
 | `inventory` | Check egg availability |
-| `order <qty>` | Order eggs (qty must be positive integer) |
+| `order <6\|12>` | Order eggs (half-dozen or dozen) |
+| `cancel <order_id>` | Cancel a pending order |
 | `balance` | Check payment balance (received - spent) |
 | `history` | View last 5 orders |
 | `help` | Show available commands |
@@ -192,22 +197,32 @@ Only npubs in the `admins` config list can use:
 
 | Command | Description |
 |---------|-------------|
-| `add <qty>` | Add eggs to inventory |
-| `deliver <npub>` | Fulfill customer's pending orders |
+| `inventory add <qty>` | Add eggs to inventory |
+| `inventory set <qty>` | Set inventory to exact count |
+| `deliver <npub>` | Fulfill customer's paid orders |
 | `payment <npub> <sats>` | Record manual payment |
 | `adjust <npub> <sats>` | Adjust customer balance (+/-) |
+| `orders` | List all orders (all customers) |
 | `customers` | List all registered customers |
 | `addcustomer <npub>` | Register new customer |
 | `removecustomer <npub>` | Remove customer |
+| `sales` | Show total sales in sats |
 
 ## Payment Flow
 
 1. Customer sends `order 12` via encrypted DM
-2. Bot creates pending order and responds with price
-3. Customer zaps the bot's npub for the amount
-4. Bot receives zap receipt, validates it, credits balance
-5. If balance covers pending orders, orders are marked as paid
+2. Bot creates pending order and responds with:
+   - Order summary and price
+   - Bolt11 invoice (clickable in Amethyst, if lightning address configured)
+   - Bot's npub for zap payments
+3. Customer pays via:
+   - **Option A**: Pay the bolt11 invoice directly (not tracked by bot)
+   - **Option B**: Zap the bot's npub (recommended - generates trackable receipt)
+4. If zapped: Bot receives zap receipt, validates it, credits customer balance
+5. When balance covers pending orders, orders are marked as paid
 6. Admin uses `deliver <npub>` when physically delivering eggs
+
+**Note**: Direct invoice payments are not tracked by the bot. Zaps are the recommended payment method because they generate NIP-57 receipts that the bot can verify and credit.
 
 ## Testing
 

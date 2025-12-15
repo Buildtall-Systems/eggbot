@@ -156,3 +156,106 @@ Completed 5-phase implementation to fix logical inconsistencies in inventory/ord
 | No order cancellation | FIXED - Cancel command added |
 | No admin visibility | FIXED - Orders list command added |
 | Cancel doesn't restore inventory | FIXED - Atomic restore on cancel |
+
+## 2025-12-15 (continued)
+
+### Comprehensive FSM Migration
+
+Completed 7-phase migration to explicit finite state machines (looplab/fsm) for order, inventory, and bot event processing.
+
+**Phase 1: Foundation (Complete)**
+- Added looplab/fsm dependency to go.mod
+- Created `internal/fsm/` package structure
+- Added `fsm.go` with shared constants for all three FSMs
+
+**Phase 2: OrderStateMachine (Complete)**
+- Implemented `internal/fsm/order.go` with states: pending, paid, fulfilled, cancelled
+- Events: pay, fulfill, cancel
+- Comprehensive test coverage in `order_test.go` (100% paths)
+- Tests: valid transitions, invalid transitions, can-query predicates, all states covered
+
+**Phase 3: InventoryStateMachine (Complete)**
+- Implemented `internal/fsm/inventory.go` with states: available, reserved, consumed
+- Events: reserve, restore, consume
+- Comprehensive test coverage in `inventory_test.go` (100% paths)
+- Tests: reserve, consume, restore, invalid transitions
+
+**Phase 4: EventProcessorFSM (Complete)**
+- Implemented `internal/fsm/processor.go` with states: idle, processing_dm, processing_zap, sending_response
+- Events: dm_received, zap_received, command_processed, response_sent, error
+- Comprehensive test coverage in `processor_test.go` (100% paths)
+- Tests: DM flow, zap flow, error recovery, invalid transitions, callbacks, reset, concurrent access
+
+**Phase 5: Order FSM Integration (Complete)**
+- Integrated OrderStateMachine into `internal/db/operations.go`
+- `UpdateOrderStatus()` validates transitions before state change
+- `FulfillOrder()` enforces paid-state requirement via FSM + atomic WHERE clause
+- `CancelOrder()` validates cancel only possible from pending state
+- Added `ErrInvalidStateTransition` error type
+- Updated all database tests to follow valid state progressions:
+  - `TestFulfillOrder` - requires paid state
+  - `TestTransactionsAndBalance` - follows pending→paid→fulfilled
+  - `TestCancelOrder` - cancels from pending, restores inventory
+- Updated customer command tests: `TestBalanceCmd` follows correct state progression
+
+**Phase 6: Bot FSM Integration (Complete)**
+- Imported fsm package in `internal/cli/run.go`
+- Initialized EventProcessorFSM at bot startup
+- DM processing flow: idle →[dm_received]→ processing_dm →[command_processed]→ sending_response →[response_sent]→ idle
+- Zap processing flow: idle →[zap_received]→ processing_zap →[response_sent]→ idle
+- Error handling: [any state] →[error]→ idle on failures
+- FSM reset to idle after each event completes or on error
+- All valid state transitions logged on errors for debugging
+
+**Phase 7: Documentation & Cleanup (Complete)**
+- Created `docs/FSM_MIGRATION.md` - Comprehensive 300+ line migration guide
+  - Overview, motivation, architecture (three FSMs)
+  - Design patterns: FSM as Validator, thread-safe access
+  - Testing strategy with 25+ test cases
+  - Migration checklist (all items complete)
+  - Quality metrics: 100% coverage, 0 race conditions, 0 lint errors
+  - Migration guide for maintainers (adding states/events)
+  - Debugging techniques
+  - Future enhancements: visualization, hooks, queued processing, retry logic, history, composition
+- Created `docs/FSM_QUICK_REFERENCE.md` - Quick reference guide
+  - Import statements
+  - Usage patterns for all three FSMs
+  - State and event diagrams
+  - Common patterns: validate-then-execute, error recovery, callbacks
+  - All constants defined and documented
+  - Debugging guide
+  - File locations
+- Created `.claude/LEARNINGS.md` - Patterns & insights
+  - FSM as Validator pattern (PROVEN)
+  - Test-driven FSM definition (PROVEN)
+  - Event loop FSM integration (PROVEN)
+  - Atomic WHERE clauses for optimistic locking (PROVEN)
+  - Test migration pattern (PROVEN)
+  - Extraction readiness assessment
+  - Known limitations and future work
+
+**Verification**:
+- Full test suite passes with race detector: `go test -race ./...`
+- Build successful: `go build ./...`
+- Lint clean (zero FSM-related issues): Only 3 pre-existing staticcheck issues in relay.go
+- All tests re-run after each phase: 160+ test cases passing
+- Quality metrics:
+  - Test coverage: 100% of FSM code paths
+  - Race conditions: 0 detected
+  - Lint errors: 0 in FSM code
+  - State transitions: 13 total (4 order + 3 inventory + 5 processor + error path)
+  - Thread safety: Mutex-protected singleton per FSM package
+
+**FSM as Validator Pattern**:
+- Database remains source of truth; FSM validates logic before execution
+- Package-level FSM singletons with mutex protection
+- Atomic WHERE clauses prevent concurrent state corruption
+- Invalid transitions caught at validation layer
+- Reusable pattern for any domain with state validation needs
+
+**Key Insights**:
+1. FSM doesn't own state—database does (separation of concerns)
+2. Test-first approach exposed all edge cases and invalid assumptions
+3. Atomic WHERE prevents race conditions without explicit locks
+4. Error recovery via FSM reset ensures bot always reaches valid state
+5. Pattern ready for extraction and reuse in other buildtall.systems projects

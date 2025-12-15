@@ -197,43 +197,48 @@ func TestFulfillOrder(t *testing.T) {
 	ctx := context.Background()
 	db := setupTestDB(t)
 
-	// Create customer
 	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
 	c, _ := db.CreateCustomer(ctx, npub)
 
-	// Add inventory first (required for reservation model)
 	_ = db.AddEggs(ctx, 10)
 
-	// Create order (reserves 6 eggs, leaving 4)
 	order, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
 
-	// Verify inventory was reserved at order time
 	count, _ := db.GetInventory(ctx)
 	if count != 4 {
 		t.Errorf("expected 4 eggs after order reservation, got %d", count)
 	}
 
-	// Fulfill should succeed (no inventory deduction, just status change)
+	// FSM requires pending -> paid -> fulfilled (cannot skip paid)
+	err := db.FulfillOrder(ctx, order.ID)
+	if err == nil {
+		t.Error("expected error when fulfilling pending order (must be paid first)")
+	}
+
+	// Mark as paid first
+	if err := db.UpdateOrderStatus(ctx, order.ID, "paid"); err != nil {
+		t.Fatalf("UpdateOrderStatus to paid: %v", err)
+	}
+
+	// Now fulfill should succeed
 	if err := db.FulfillOrder(ctx, order.ID); err != nil {
 		t.Fatalf("FulfillOrder: %v", err)
 	}
 
-	// Check inventory unchanged (was already deducted at order time)
 	count, _ = db.GetInventory(ctx)
 	if count != 4 {
 		t.Errorf("expected 4 eggs after fulfill (no change), got %d", count)
 	}
 
-	// Check order status
 	order, _ = db.GetOrderByID(ctx, order.ID)
 	if order.Status != "fulfilled" {
 		t.Errorf("expected status fulfilled, got %s", order.Status)
 	}
 
 	// Fulfill again should fail
-	err := db.FulfillOrder(ctx, order.ID)
-	if err == nil || err.Error() != "order already fulfilled" {
-		t.Errorf("expected already fulfilled error, got %v", err)
+	err = db.FulfillOrder(ctx, order.ID)
+	if err == nil {
+		t.Error("expected error when fulfilling already fulfilled order")
 	}
 }
 
@@ -310,8 +315,9 @@ func TestTransactionsAndBalance(t *testing.T) {
 	// Add inventory first (required for reservation model)
 	_ = db.AddEggs(ctx, 10)
 
-	// Create and fulfill order to test spent calculation
+	// Create, pay, and fulfill order to test spent calculation
 	order, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = db.UpdateOrderStatus(ctx, order.ID, "paid")
 	_ = db.FulfillOrder(ctx, order.ID)
 
 	spent, err := db.GetCustomerSpent(ctx, c.ID)
@@ -403,9 +409,67 @@ func TestCancelOrder(t *testing.T) {
 
 	// Cancel fulfilled order should fail
 	order3, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = db.UpdateOrderStatus(ctx, order3.ID, "paid")
 	_ = db.FulfillOrder(ctx, order3.ID)
 	err = db.CancelOrder(ctx, order3.ID)
 	if err != ErrOrderNotPending {
 		t.Errorf("expected ErrOrderNotPending for fulfilled order, got %v", err)
+	}
+}
+
+func TestGetTotalSales(t *testing.T) {
+	ctx := context.Background()
+	db := setupTestDB(t)
+
+	// No orders - should return 0
+	total, err := db.GetTotalSales(ctx)
+	if err != nil {
+		t.Fatalf("GetTotalSales: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("expected 0 with no orders, got %d", total)
+	}
+
+	// Create customer and inventory
+	c, _ := db.CreateCustomer(ctx, "npub1test")
+	_ = db.AddEggs(ctx, 100)
+
+	// Create pending order - should not count
+	_, _ = db.CreateOrder(ctx, c.ID, 6, 3200)
+	total, _ = db.GetTotalSales(ctx)
+	if total != 0 {
+		t.Errorf("expected 0 with pending order only, got %d", total)
+	}
+
+	// Create paid order - should not count
+	order2, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = db.UpdateOrderStatus(ctx, order2.ID, "paid")
+	total, _ = db.GetTotalSales(ctx)
+	if total != 0 {
+		t.Errorf("expected 0 with paid order only, got %d", total)
+	}
+
+	// Fulfill the paid order - now it should count
+	_ = db.FulfillOrder(ctx, order2.ID)
+	total, _ = db.GetTotalSales(ctx)
+	if total != 3200 {
+		t.Errorf("expected 3200 after fulfillment, got %d", total)
+	}
+
+	// Add another fulfilled order
+	order3, _ := db.CreateOrder(ctx, c.ID, 12, 6400)
+	_ = db.UpdateOrderStatus(ctx, order3.ID, "paid")
+	_ = db.FulfillOrder(ctx, order3.ID)
+	total, _ = db.GetTotalSales(ctx)
+	if total != 9600 {
+		t.Errorf("expected 9600 (3200+6400), got %d", total)
+	}
+
+	// Cancelled orders should not count
+	order4, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = db.CancelOrder(ctx, order4.ID)
+	total, _ = db.GetTotalSales(ctx)
+	if total != 9600 {
+		t.Errorf("expected 9600 (cancelled order not counted), got %d", total)
 	}
 }
