@@ -338,8 +338,8 @@ func TestInventoryCmd_AdminView(t *testing.T) {
 	if !strings.Contains(result.Message, "12 eggs (awaiting delivery)") {
 		t.Errorf("expected 12 sold eggs, got %q", result.Message)
 	}
-	if !strings.Contains(result.Message, "18 eggs (reserved + sold)") {
-		t.Errorf("expected 18 on-hand eggs, got %q", result.Message)
+	if !strings.Contains(result.Message, "30 eggs (total in storage)") {
+		t.Errorf("expected 30 on-hand eggs, got %q", result.Message)
 	}
 }
 

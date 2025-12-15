@@ -81,12 +81,12 @@ func showInventory(ctx context.Context, database *db.DB, isAdmin bool) Result {
 		return Result{Error: fmt.Errorf("checking sold eggs: %w", err)}
 	}
 
-	onHand := reserved + sold
+	onHand := available + reserved + sold
 	msg := fmt.Sprintf("Available: %3d eggs (can be sold)\n", available)
 	msg += fmt.Sprintf("Reserved:  %3d eggs (pending payment)\n", reserved)
 	msg += fmt.Sprintf("Sold:      %3d eggs (awaiting delivery)\n", sold)
 	msg += "---\n"
-	msg += fmt.Sprintf("On-hand:   %3d eggs (reserved + sold)", onHand)
+	msg += fmt.Sprintf("On-hand:   %3d eggs (total in storage)", onHand)
 
 	return Result{Message: msg}
 }
