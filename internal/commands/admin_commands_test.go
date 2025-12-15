@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -15,13 +16,18 @@ func TestDeliverCmd(t *testing.T) {
 	ctx := context.Background()
 	database := setupCmdTestDB(t)
 
-	// Setup customer using properly generated keypair
+	// Setup customer and inventory
 	c, _ := database.CreateCustomer(ctx, testCustomerNpub)
+	_ = database.AddEggs(ctx, 30)
+
+	// Create orders in different states for testing
+	pendingOrder, _ := database.CreateOrder(ctx, c.ID, 6, 3200)
+	paidOrder, _ := database.CreateOrder(ctx, c.ID, 12, 6400)
+	_ = database.UpdateOrderStatus(ctx, paidOrder.ID, "paid")
 
 	tests := []struct {
 		name        string
 		args        []string
-		setup       func()
 		wantErr     bool
 		errContains string
 		msgContains string
@@ -29,47 +35,37 @@ func TestDeliverCmd(t *testing.T) {
 		{
 			name:        "no args",
 			args:        []string{},
-			setup:       func() {},
 			wantErr:     true,
 			errContains: "usage",
 		},
 		{
-			name:        "invalid npub format",
-			args:        []string{"notanpub"},
-			setup:       func() {},
+			name:        "invalid order_id format",
+			args:        []string{"notanumber"},
 			wantErr:     true,
-			errContains: "invalid npub",
+			errContains: "order_id must be a number",
 		},
 		{
-			name:        "customer not found",
-			args:        []string{testUnknownNpub}, // properly generated but not registered
-			setup:       func() {},
+			name:        "order not found",
+			args:        []string{"9999"},
 			wantErr:     true,
-			errContains: "customer not found",
+			errContains: "order 9999 not found",
 		},
 		{
-			name:        "no paid orders",
-			args:        []string{testCustomerNpub},
-			setup:       func() {},
-			wantErr:     false,
-			msgContains: "No paid orders to deliver",
+			name:        "order not paid",
+			args:        []string{fmt.Sprintf("%d", pendingOrder.ID)},
+			wantErr:     true,
+			errContains: "is pending, not paid",
 		},
 		{
-			name: "deliver paid order",
-			args: []string{testCustomerNpub},
-			setup: func() {
-				_ = database.AddEggs(ctx, 10)
-				order, _ := database.CreateOrder(ctx, c.ID, 6, 3200)
-				_ = database.UpdateOrderStatus(ctx, order.ID, "paid") // Must be paid to deliver
-			},
+			name:        "deliver paid order",
+			args:        []string{fmt.Sprintf("%d", paidOrder.ID)},
 			wantErr:     false,
-			msgContains: "Delivered 1 orders",
+			msgContains: "Delivered order",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setup()
 			result := DeliverCmd(ctx, database, tt.args)
 			if tt.wantErr {
 				if result.Error == nil {
@@ -90,7 +86,7 @@ func TestDeliverCmd(t *testing.T) {
 	}
 }
 
-func TestDeliverCmd_OnlyDeliversPaidOrders(t *testing.T) {
+func TestDeliverCmd_VerifiesOrderStateChange(t *testing.T) {
 	ctx := context.Background()
 	database := setupCmdTestDB(t)
 
@@ -98,51 +94,37 @@ func TestDeliverCmd_OnlyDeliversPaidOrders(t *testing.T) {
 	c, _ := database.CreateCustomer(ctx, testCustomerNpub)
 	_ = database.AddEggs(ctx, 30)
 
-	// Create orders in different states
-	pendingOrder, _ := database.CreateOrder(ctx, c.ID, 6, 3200)   // status: pending (unpaid)
-	paidOrder, _ := database.CreateOrder(ctx, c.ID, 12, 6400)     // status: paid (will be set below)
-	cancelledOrder, _ := database.CreateOrder(ctx, c.ID, 6, 3200) // status: cancelled (will be set below)
+	// Create a paid order
+	order, _ := database.CreateOrder(ctx, c.ID, 12, 6400)
+	_ = database.UpdateOrderStatus(ctx, order.ID, "paid")
 
-	// Set statuses
-	_ = database.UpdateOrderStatus(ctx, paidOrder.ID, "paid")
-	_ = database.CancelOrder(ctx, cancelledOrder.ID)
-
-	// Deliver - should only deliver the paid order
-	result := DeliverCmd(ctx, database, []string{testCustomerNpub})
+	// Deliver the order
+	result := DeliverCmd(ctx, database, []string{fmt.Sprintf("%d", order.ID)})
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
 
-	// Should have delivered 1 order (12 eggs)
-	if !strings.Contains(result.Message, "Delivered 1 orders") {
-		t.Errorf("expected 1 order delivered, got %q", result.Message)
+	// Verify message contains order ID and quantity
+	if !strings.Contains(result.Message, fmt.Sprintf("Delivered order %d", order.ID)) {
+		t.Errorf("expected order ID in message, got %q", result.Message)
 	}
 	if !strings.Contains(result.Message, "12 eggs") {
-		t.Errorf("expected 12 eggs, got %q", result.Message)
+		t.Errorf("expected '12 eggs' in message, got %q", result.Message)
 	}
 
-	// Verify the paid order is now fulfilled
-	order, _ := database.GetOrderByID(ctx, paidOrder.ID)
-	if order.Status != "fulfilled" {
-		t.Errorf("expected paid order to be fulfilled, got %s", order.Status)
+	// Verify the order is now fulfilled
+	updatedOrder, _ := database.GetOrderByID(ctx, order.ID)
+	if updatedOrder.Status != "fulfilled" {
+		t.Errorf("expected order to be fulfilled, got %s", updatedOrder.Status)
 	}
 
-	// Verify the pending order is still pending (not delivered)
-	order, _ = database.GetOrderByID(ctx, pendingOrder.ID)
-	if order.Status != "pending" {
-		t.Errorf("expected pending order to remain pending, got %s", order.Status)
+	// Try delivering again - should fail (already fulfilled)
+	result = DeliverCmd(ctx, database, []string{fmt.Sprintf("%d", order.ID)})
+	if result.Error == nil {
+		t.Fatal("expected error when delivering already fulfilled order")
 	}
-
-	// Verify cancelled order is still cancelled
-	order, _ = database.GetOrderByID(ctx, cancelledOrder.ID)
-	if order.Status != "cancelled" {
-		t.Errorf("expected cancelled order to remain cancelled, got %s", order.Status)
-	}
-
-	// Try delivering again - should have no paid orders
-	result = DeliverCmd(ctx, database, []string{testCustomerNpub})
-	if !strings.Contains(result.Message, "No paid orders to deliver") {
-		t.Errorf("expected no paid orders message, got %q", result.Message)
+	if !strings.Contains(result.Error.Error(), "is fulfilled, not paid") {
+		t.Errorf("expected 'is fulfilled, not paid' error, got %q", result.Error.Error())
 	}
 }
 

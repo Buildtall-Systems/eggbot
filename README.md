@@ -294,9 +294,10 @@ Only npubs in the `admins` config list can use:
 
 | Command | Description |
 |---------|-------------|
+| `inventory` | Show breakdown: available, reserved (pending), sold (paid), on-hand |
 | `inventory add <qty>` | Add eggs to inventory |
 | `inventory set <qty>` | Set inventory to exact count |
-| `deliver <npub>` | Fulfill customer's paid orders |
+| `deliver <order_id>` | Fulfill a specific paid order |
 | `payment <npub> <sats>` | Record manual payment |
 | `adjust <npub> <sats>` | Adjust customer balance (+/-) |
 | `orders` | List all orders (all customers) |
@@ -317,7 +318,7 @@ Only npubs in the `admins` config list can use:
    - **Option B**: Zap the bot's npub (recommended - generates trackable receipt)
 4. If zapped: Bot receives zap receipt, validates it, credits customer balance
 5. When balance covers pending orders, orders are marked as paid
-6. Admin uses `deliver <npub>` when physically delivering eggs
+6. Admin uses `deliver <order_id>` when physically delivering eggs (see order IDs in `orders` list)
 
 **Note**: Direct invoice payments are not tracked by the bot. Zaps are the recommended payment method because they generate NIP-57 receipts that the bot can verify and credit.
 

@@ -277,6 +277,72 @@ func TestInventoryCmd_UnknownSubcommand(t *testing.T) {
 	}
 }
 
+func TestInventoryCmd_AdminView(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	// Setup: create customer and inventory
+	c, _ := database.CreateCustomer(ctx, testCustomerNpub)
+	_ = database.AddEggs(ctx, 30)
+
+	// Create orders in different states to test breakdown
+	// Pending order: 6 eggs (reserved)
+	_, _ = database.CreateOrder(ctx, c.ID, 6, 3200)
+
+	// Paid order: 12 eggs (sold)
+	paidOrder, _ := database.CreateOrder(ctx, c.ID, 12, 6400)
+	_ = database.UpdateOrderStatus(ctx, paidOrder.ID, "paid")
+
+	// After orders: available = 30 - 6 - 12 = 12 eggs
+
+	// Test customer view - should only show available
+	result := InventoryCmd(ctx, database, []string{}, false)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if !strings.Contains(result.Message, "12 eggs available") {
+		t.Errorf("customer view should show simple count, got %q", result.Message)
+	}
+	// Should NOT show breakdown
+	if strings.Contains(result.Message, "Reserved") {
+		t.Error("customer view should not show Reserved breakdown")
+	}
+
+	// Test admin view - should show full breakdown
+	result = InventoryCmd(ctx, database, []string{}, true)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+
+	// Check for all categories
+	if !strings.Contains(result.Message, "Available:") {
+		t.Errorf("admin view should show Available, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "Reserved:") {
+		t.Errorf("admin view should show Reserved, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "Sold:") {
+		t.Errorf("admin view should show Sold, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "On-hand:") {
+		t.Errorf("admin view should show On-hand, got %q", result.Message)
+	}
+
+	// Check values (available=12, reserved=6, sold=12, on-hand=18)
+	if !strings.Contains(result.Message, "12 eggs (can be sold)") {
+		t.Errorf("expected 12 available eggs, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "6 eggs (pending payment)") {
+		t.Errorf("expected 6 reserved eggs, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "12 eggs (awaiting delivery)") {
+		t.Errorf("expected 12 sold eggs, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "18 eggs (reserved + sold)") {
+		t.Errorf("expected 18 on-hand eggs, got %q", result.Message)
+	}
+}
+
 func TestOrderCmd(t *testing.T) {
 	ctx := context.Background()
 	database := setupCmdTestDB(t)

@@ -11,65 +11,51 @@ import (
 	"github.com/nbd-wtf/go-nostr/nip19"
 )
 
-// DeliverCmd fulfills paid orders for a customer.
-// Args: [npub]
-// Only orders with status='paid' can be delivered. Pending (unpaid) orders are skipped.
+// DeliverCmd fulfills a specific paid order by ID.
+// Args: [order_id]
+// Only orders with status='paid' can be delivered.
 func DeliverCmd(ctx context.Context, database *db.DB, args []string) Result {
 	if len(args) < 1 {
-		return Result{Error: errors.New("usage: deliver <npub>")}
+		return Result{Error: errors.New("usage: deliver <order_id>")}
 	}
 
-	npub := args[0]
-	if !strings.HasPrefix(npub, "npub1") {
-		return Result{Error: errors.New("invalid npub format")}
+	orderID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return Result{Error: errors.New("order_id must be a number")}
 	}
 
-	// Validate npub
-	prefix, _, err := nip19.Decode(npub)
-	if err != nil || prefix != "npub" {
-		return Result{Error: errors.New("invalid npub")}
+	// Get the order
+	order, err := database.GetOrderByID(ctx, orderID)
+	if errors.Is(err, db.ErrOrderNotFound) {
+		return Result{Error: fmt.Errorf("order %d not found", orderID)}
+	}
+	if err != nil {
+		return Result{Error: fmt.Errorf("looking up order: %w", err)}
 	}
 
-	customer, err := database.GetCustomerByNpub(ctx, npub)
-	if errors.Is(err, db.ErrCustomerNotFound) {
-		return Result{Error: errors.New("customer not found")}
+	// Verify order is in paid status
+	if order.Status != "paid" {
+		return Result{Error: fmt.Errorf("order %d is %s, not paid", orderID, order.Status)}
 	}
+
+	// Get customer info for response
+	customer, err := database.GetCustomerByID(ctx, order.CustomerID)
 	if err != nil {
 		return Result{Error: fmt.Errorf("looking up customer: %w", err)}
 	}
 
-	// Get paid orders (only paid orders can be delivered)
-	orders, err := database.GetPaidOrdersByCustomer(ctx, customer.ID)
-	if err != nil {
-		return Result{Error: fmt.Errorf("getting paid orders: %w", err)}
+	// Fulfill the order
+	if err := database.FulfillOrder(ctx, orderID); err != nil {
+		return Result{Error: fmt.Errorf("fulfilling order: %w", err)}
 	}
 
-	if len(orders) == 0 {
-		return Result{Message: "No paid orders to deliver for this customer."}
+	// Truncate npub for display: npub1abc...xyz
+	npubShort := customer.Npub
+	if len(npubShort) > 20 {
+		npubShort = npubShort[:12] + "..." + npubShort[len(npubShort)-4:]
 	}
 
-	// Fulfill each paid order
-	var fulfilled int
-	var totalEggs int
-	var errs []string
-	for _, order := range orders {
-		if err := database.FulfillOrder(ctx, order.ID); err != nil {
-			if errors.Is(err, db.ErrInsufficientInventory) {
-				errs = append(errs, fmt.Sprintf("order #%d: insufficient inventory", order.ID))
-			} else {
-				errs = append(errs, fmt.Sprintf("order #%d: %v", order.ID, err))
-			}
-			continue
-		}
-		fulfilled++
-		totalEggs += order.Quantity
-	}
-
-	msg := fmt.Sprintf("Delivered %d orders (%d eggs).", fulfilled, totalEggs)
-	if len(errs) > 0 {
-		msg += "\nErrors: " + strings.Join(errs, "; ")
-	}
-	return Result{Message: msg}
+	return Result{Message: fmt.Sprintf("Delivered order %d: %d eggs to %s", orderID, order.Quantity, npubShort)}
 }
 
 // PaymentCmd records a manual payment for a customer.

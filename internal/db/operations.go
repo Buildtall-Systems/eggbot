@@ -127,6 +127,30 @@ func (db *DB) DeductEggs(ctx context.Context, count int) error {
 	return nil
 }
 
+// GetReservedEggs returns the total eggs in pending (unpaid) orders.
+func (db *DB) GetReservedEggs(ctx context.Context) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(quantity), 0) FROM orders WHERE status = 'pending'
+	`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("querying reserved eggs: %w", err)
+	}
+	return count, nil
+}
+
+// GetSoldEggs returns the total eggs in paid orders awaiting delivery.
+func (db *DB) GetSoldEggs(ctx context.Context) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(quantity), 0) FROM orders WHERE status = 'paid'
+	`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("querying sold eggs: %w", err)
+	}
+	return count, nil
+}
+
 // GetCustomerByNpub returns a customer by their npub.
 func (db *DB) GetCustomerByNpub(ctx context.Context, npub string) (*Customer, error) {
 	var c Customer
@@ -134,6 +158,22 @@ func (db *DB) GetCustomerByNpub(ctx context.Context, npub string) (*Customer, er
 		SELECT id, npub, name, created_at, updated_at
 		FROM customers WHERE npub = ?
 	`, npub).Scan(&c.ID, &c.Npub, &c.Name, &c.CreatedAt, &c.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrCustomerNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying customer: %w", err)
+	}
+	return &c, nil
+}
+
+// GetCustomerByID returns a customer by their ID.
+func (db *DB) GetCustomerByID(ctx context.Context, id int64) (*Customer, error) {
+	var c Customer
+	err := db.QueryRowContext(ctx, `
+		SELECT id, npub, name, created_at, updated_at
+		FROM customers WHERE id = ?
+	`, id).Scan(&c.ID, &c.Npub, &c.Name, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCustomerNotFound
 	}

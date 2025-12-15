@@ -24,7 +24,7 @@ type Result struct {
 func InventoryCmd(ctx context.Context, database *db.DB, args []string, isAdmin bool) Result {
 	// No subcommand: show inventory
 	if len(args) == 0 {
-		return showInventory(ctx, database)
+		return showInventory(ctx, database, isAdmin)
 	}
 
 	subcommand := args[0]
@@ -47,24 +47,48 @@ func InventoryCmd(ctx context.Context, database *db.DB, args []string, isAdmin b
 		if isAdmin {
 			return Result{Error: fmt.Errorf("unknown subcommand: %s (use add or set)", subcommand)}
 		}
-		return showInventory(ctx, database)
+		return showInventory(ctx, database, false)
 	}
 }
 
 // showInventory returns the current egg count.
-func showInventory(ctx context.Context, database *db.DB) Result {
-	count, err := database.GetInventory(ctx)
+// For admins, shows a breakdown of available, reserved (pending), and sold (paid) eggs.
+func showInventory(ctx context.Context, database *db.DB, isAdmin bool) Result {
+	available, err := database.GetInventory(ctx)
 	if err != nil {
 		return Result{Error: fmt.Errorf("checking inventory: %w", err)}
 	}
 
-	if count == 0 {
-		return Result{Message: "No eggs available. Check back later!"}
+	if !isAdmin {
+		// Customer view: simple count
+		if available == 0 {
+			return Result{Message: "No eggs available. Check back later!"}
+		}
+		if available == 1 {
+			return Result{Message: "1 egg available."}
+		}
+		return Result{Message: fmt.Sprintf("%d eggs available.", available)}
 	}
-	if count == 1 {
-		return Result{Message: "1 egg available."}
+
+	// Admin view: full breakdown
+	reserved, err := database.GetReservedEggs(ctx)
+	if err != nil {
+		return Result{Error: fmt.Errorf("checking reserved eggs: %w", err)}
 	}
-	return Result{Message: fmt.Sprintf("%d eggs available.", count)}
+
+	sold, err := database.GetSoldEggs(ctx)
+	if err != nil {
+		return Result{Error: fmt.Errorf("checking sold eggs: %w", err)}
+	}
+
+	onHand := reserved + sold
+	msg := fmt.Sprintf("Available: %3d eggs (can be sold)\n", available)
+	msg += fmt.Sprintf("Reserved:  %3d eggs (pending payment)\n", reserved)
+	msg += fmt.Sprintf("Sold:      %3d eggs (awaiting delivery)\n", sold)
+	msg += "---\n"
+	msg += fmt.Sprintf("On-hand:   %3d eggs (reserved + sold)", onHand)
+
+	return Result{Message: msg}
 }
 
 // inventoryAdd adds eggs to inventory.
@@ -290,7 +314,7 @@ func HelpCmd(isAdmin bool) Result {
 Admin commands:
 • inventory add <qty> - Add eggs to inventory
 • inventory set <qty> - Set inventory to exact count
-• deliver <npub> - Fulfill customer's paid orders
+• deliver <order_id> - Fulfill a specific paid order
 • payment <npub> <sats> - Record manual payment
 • adjust <npub> <sats> - Adjust customer balance
 • orders - List all orders (all customers)

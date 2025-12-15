@@ -75,6 +75,106 @@ func TestInventory(t *testing.T) {
 	}
 }
 
+func TestGetReservedEggs(t *testing.T) {
+	ctx := context.Background()
+	db := setupTestDB(t)
+
+	// Initially no reserved eggs
+	reserved, err := db.GetReservedEggs(ctx)
+	if err != nil {
+		t.Fatalf("GetReservedEggs: %v", err)
+	}
+	if reserved != 0 {
+		t.Errorf("expected 0 reserved eggs, got %d", reserved)
+	}
+
+	// Create customer and inventory
+	c, _ := db.CreateCustomer(ctx, "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5")
+	_ = db.AddEggs(ctx, 30)
+
+	// Create pending order - should be counted as reserved
+	_, err = db.CreateOrder(ctx, c.ID, 6, 3200)
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+
+	reserved, err = db.GetReservedEggs(ctx)
+	if err != nil {
+		t.Fatalf("GetReservedEggs: %v", err)
+	}
+	if reserved != 6 {
+		t.Errorf("expected 6 reserved eggs, got %d", reserved)
+	}
+
+	// Create another pending order
+	_, err = db.CreateOrder(ctx, c.ID, 12, 6400)
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+
+	reserved, err = db.GetReservedEggs(ctx)
+	if err != nil {
+		t.Fatalf("GetReservedEggs: %v", err)
+	}
+	if reserved != 18 {
+		t.Errorf("expected 18 reserved eggs (6+12), got %d", reserved)
+	}
+}
+
+func TestGetSoldEggs(t *testing.T) {
+	ctx := context.Background()
+	db := setupTestDB(t)
+
+	// Initially no sold eggs
+	sold, err := db.GetSoldEggs(ctx)
+	if err != nil {
+		t.Fatalf("GetSoldEggs: %v", err)
+	}
+	if sold != 0 {
+		t.Errorf("expected 0 sold eggs, got %d", sold)
+	}
+
+	// Create customer and inventory
+	c, _ := db.CreateCustomer(ctx, "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5")
+	_ = db.AddEggs(ctx, 30)
+
+	// Create and pay order - should be counted as sold
+	order, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = db.UpdateOrderStatus(ctx, order.ID, "paid")
+
+	sold, err = db.GetSoldEggs(ctx)
+	if err != nil {
+		t.Fatalf("GetSoldEggs: %v", err)
+	}
+	if sold != 6 {
+		t.Errorf("expected 6 sold eggs, got %d", sold)
+	}
+
+	// Pending order should NOT count as sold
+	_, _ = db.CreateOrder(ctx, c.ID, 12, 6400)
+
+	sold, err = db.GetSoldEggs(ctx)
+	if err != nil {
+		t.Fatalf("GetSoldEggs: %v", err)
+	}
+	if sold != 6 {
+		t.Errorf("pending order should not affect sold count, expected 6, got %d", sold)
+	}
+
+	// Fulfilled order should NOT count as sold (already delivered)
+	order2, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = db.UpdateOrderStatus(ctx, order2.ID, "paid")
+	_ = db.FulfillOrder(ctx, order2.ID)
+
+	sold, err = db.GetSoldEggs(ctx)
+	if err != nil {
+		t.Fatalf("GetSoldEggs: %v", err)
+	}
+	if sold != 6 {
+		t.Errorf("fulfilled order should not count as sold, expected 6, got %d", sold)
+	}
+}
+
 func TestCustomerCRUD(t *testing.T) {
 	ctx := context.Background()
 	db := setupTestDB(t)
