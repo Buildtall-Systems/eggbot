@@ -111,6 +111,16 @@ func runBot(cmd *cobra.Command, args []string) error {
 			log.Printf("received DM event: %s (kind:%d)", event.ID, event.Kind)
 			eventTs := int64(event.CreatedAt)
 
+			isNew, err := database.TryProcess(event.ID, event.Kind, eventTs)
+			if err != nil {
+				log.Printf("dedup check failed: %v", err)
+				continue
+			}
+			if !isNew {
+				log.Printf("duplicate event %s, skipping", event.ID)
+				continue
+			}
+
 			// Decrypt DM based on kind
 			var senderPubkey, messageContent string
 			var incomingProtocol dm.DMProtocol
@@ -216,6 +226,16 @@ func runBot(cmd *cobra.Command, args []string) error {
 			}
 			log.Printf("received zap event: %s (kind:%d)", event.ID, event.Kind)
 			eventTs := int64(event.CreatedAt)
+
+			isNew, err := database.TryProcess(event.ID, event.Kind, eventTs)
+			if err != nil {
+				log.Printf("dedup check failed: %v", err)
+				continue
+			}
+			if !isNew {
+				log.Printf("duplicate event %s, skipping", event.ID)
+				continue
+			}
 
 			// Validate the zap receipt
 			validatedZap, err := zaps.ValidateZapReceipt(event, cfg.Lightning.LnurlPubkeyHex)

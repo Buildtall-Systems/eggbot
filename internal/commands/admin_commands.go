@@ -36,8 +36,9 @@ func AddEggsCmd(ctx context.Context, database *db.DB, args []string) Result {
 	return Result{Message: fmt.Sprintf("Added %d eggs. Total: %d", quantity, total)}
 }
 
-// DeliverCmd fulfills pending orders for a customer.
+// DeliverCmd fulfills paid orders for a customer.
 // Args: [npub]
+// Only orders with status='paid' can be delivered. Pending (unpaid) orders are skipped.
 func DeliverCmd(ctx context.Context, database *db.DB, args []string) Result {
 	if len(args) < 1 {
 		return Result{Error: errors.New("usage: deliver <npub>")}
@@ -62,17 +63,17 @@ func DeliverCmd(ctx context.Context, database *db.DB, args []string) Result {
 		return Result{Error: fmt.Errorf("looking up customer: %w", err)}
 	}
 
-	// Get pending orders
-	orders, err := database.GetPendingOrdersByCustomer(ctx, customer.ID)
+	// Get paid orders (only paid orders can be delivered)
+	orders, err := database.GetPaidOrdersByCustomer(ctx, customer.ID)
 	if err != nil {
-		return Result{Error: fmt.Errorf("getting pending orders: %w", err)}
+		return Result{Error: fmt.Errorf("getting paid orders: %w", err)}
 	}
 
 	if len(orders) == 0 {
-		return Result{Message: "No pending orders for this customer."}
+		return Result{Message: "No paid orders to deliver for this customer."}
 	}
 
-	// Fulfill each order
+	// Fulfill each paid order
 	var fulfilled int
 	var totalEggs int
 	var errs []string
@@ -181,6 +182,30 @@ func AdjustCmd(ctx context.Context, database *db.DB, args []string) Result {
 		return Result{Message: fmt.Sprintf("Added %d sats to %s", amount, npub)}
 	}
 	return Result{Message: fmt.Sprintf("Deducted %d sats from %s", -amount, npub)}
+}
+
+// OrdersCmd lists all orders across all customers for admin visibility.
+func OrdersCmd(ctx context.Context, database *db.DB) Result {
+	orders, err := database.GetAllOrders(ctx, 50)
+	if err != nil {
+		return Result{Error: fmt.Errorf("listing orders: %w", err)}
+	}
+
+	if len(orders) == 0 {
+		return Result{Message: "No orders found."}
+	}
+
+	msg := fmt.Sprintf("%d orders (most recent first):\n", len(orders))
+	for _, o := range orders {
+		// Truncate npub for display: npub1abc...xyz
+		npubShort := o.CustomerNpub
+		if len(npubShort) > 20 {
+			npubShort = npubShort[:12] + "..." + npubShort[len(npubShort)-4:]
+		}
+		msg += fmt.Sprintf("• #%d: %s | %d eggs | %d sats | %s\n",
+			o.ID, npubShort, o.Quantity, o.TotalSats, o.Status)
+	}
+	return Result{Message: msg}
 }
 
 // CustomersCmd lists all registered customers.

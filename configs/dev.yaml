@@ -12,11 +12,10 @@ nostr:
   bot_npub: "npub1srcs6w4mmkjdkm6n4dh69smakmauv09vxtfrap73gr8ampwzcc8sdutrts"
 
 lightning:
-  # LNURL provider pubkey (npub of the Lightning service that signs zap receipts)
-  # Leave empty to accept zaps from any provider (less secure)
-  lnurl_pubkey: "" # e.g., "npub1..." for getalby or other LNURL provider
+  # LNURL provider npub (the Lightning service that signs zap receipts)
+  lnurl_npub: "npub108cq6066r8kgqcvflj4s8sd7flup6x8wfajnez86cs07qdts7seqacnvsn"
   # Lightning address for customers to send payments
-  address: "" # e.g., "eggbot@getalby.com"
+  address: "eggbot@getalby.com"
 
 pricing:
   sats_per_half_dozen: 3200

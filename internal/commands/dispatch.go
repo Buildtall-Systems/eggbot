@@ -26,6 +26,9 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub stri
 	case CmdOrder:
 		return OrderCmd(ctx, database, senderNpub, cmd.Args, cfg.SatsPerHalfDozen, cfg.LightningAddress)
 
+	case CmdCancel:
+		return CancelOrderCmd(ctx, database, senderNpub, cmd.Args)
+
 	case CmdBalance:
 		return BalanceCmd(ctx, database, senderNpub)
 
@@ -47,6 +50,9 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub stri
 
 	case CmdAdjust:
 		return AdjustCmd(ctx, database, cmd.Args)
+
+	case CmdOrders:
+		return OrdersCmd(ctx, database)
 
 	case CmdCustomers:
 		return CustomersCmd(ctx, database)

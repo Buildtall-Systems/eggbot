@@ -20,6 +20,9 @@ var ErrOrderNotFound = errors.New("order not found")
 // ErrCustomerExists indicates customer already registered.
 var ErrCustomerExists = errors.New("customer already exists")
 
+// ErrOrderNotPending indicates the order cannot be modified because it's not pending.
+var ErrOrderNotPending = errors.New("order is not pending")
+
 // Customer represents a registered customer.
 type Customer struct {
 	ID        int64
@@ -38,6 +41,16 @@ type Order struct {
 	Status     string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// OrderWithCustomer represents an order with customer info (for admin listing).
+type OrderWithCustomer struct {
+	ID           int64
+	CustomerNpub string
+	Quantity     int
+	TotalSats    int64
+	Status       string
+	CreatedAt    time.Time
 }
 
 // Transaction represents a zap payment record.
@@ -173,9 +186,36 @@ func (db *DB) ListCustomers(ctx context.Context) ([]Customer, error) {
 	return customers, nil
 }
 
-// CreateOrder creates a new order for a customer.
+// CreateOrder creates a new order for a customer and reserves inventory atomically.
+// Inventory is deducted at order time (reservation model). Returns ErrInsufficientInventory
+// if not enough eggs are available.
 func (db *DB) CreateOrder(ctx context.Context, customerID int64, quantity int, totalSats int64) (*Order, error) {
-	result, err := db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Reserve inventory atomically
+	result, err := tx.ExecContext(ctx, `
+		UPDATE inventory
+		SET eggs_available = eggs_available - ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1 AND eggs_available >= ?
+	`, quantity, quantity)
+	if err != nil {
+		return nil, fmt.Errorf("reserving inventory: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return nil, ErrInsufficientInventory
+	}
+
+	// Create the order
+	result, err = tx.ExecContext(ctx, `
 		INSERT INTO orders (customer_id, quantity, total_sats, status)
 		VALUES (?, ?, ?, 'pending')
 	`, customerID, quantity, totalSats)
@@ -186,6 +226,10 @@ func (db *DB) CreateOrder(ctx context.Context, customerID int64, quantity int, t
 	id, err := result.LastInsertId()
 	if err != nil {
 		return nil, fmt.Errorf("getting order id: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("committing transaction: %w", err)
 	}
 
 	return &Order{
@@ -263,6 +307,109 @@ func (db *DB) GetPendingOrdersByCustomer(ctx context.Context, customerID int64) 
 	return orders, nil
 }
 
+// GetAllOrders returns all orders with customer info for admin visibility.
+// Returns most recent first, limited by the provided count.
+func (db *DB) GetAllOrders(ctx context.Context, limit int) ([]OrderWithCustomer, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT o.id, c.npub, o.quantity, o.total_sats, o.status, o.created_at
+		FROM orders o
+		JOIN customers c ON o.customer_id = c.id
+		ORDER BY o.created_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying all orders: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var orders []OrderWithCustomer
+	for rows.Next() {
+		var o OrderWithCustomer
+		if err := rows.Scan(&o.ID, &o.CustomerNpub, &o.Quantity, &o.TotalSats, &o.Status, &o.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning order: %w", err)
+		}
+		orders = append(orders, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating orders: %w", err)
+	}
+	return orders, nil
+}
+
+// GetPaidOrdersByCustomer returns paid orders for a customer (ready for delivery).
+func (db *DB) GetPaidOrdersByCustomer(ctx context.Context, customerID int64) ([]Order, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, customer_id, quantity, total_sats, status, created_at, updated_at
+		FROM orders WHERE customer_id = ? AND status = 'paid' ORDER BY created_at ASC
+	`, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("querying paid orders: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var orders []Order
+	for rows.Next() {
+		var o Order
+		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning order: %w", err)
+		}
+		orders = append(orders, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating orders: %w", err)
+	}
+	return orders, nil
+}
+
+// CancelOrder cancels a pending order and restores the reserved inventory.
+// Returns ErrOrderNotPending if the order is not in 'pending' status.
+// Only pending orders can be cancelled.
+func (db *DB) CancelOrder(ctx context.Context, orderID int64) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Get order details
+	var quantity int
+	var status string
+	err = tx.QueryRowContext(ctx, `SELECT quantity, status FROM orders WHERE id = ?`, orderID).Scan(&quantity, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrOrderNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("querying order: %w", err)
+	}
+
+	if status != "pending" {
+		return ErrOrderNotPending
+	}
+
+	// Restore inventory (eggs were reserved at order time)
+	_, err = tx.ExecContext(ctx, `
+		UPDATE inventory
+		SET eggs_available = eggs_available + ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1
+	`, quantity)
+	if err != nil {
+		return fmt.Errorf("restoring inventory: %w", err)
+	}
+
+	// Update order status
+	_, err = tx.ExecContext(ctx, `
+		UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?
+	`, orderID)
+	if err != nil {
+		return fmt.Errorf("cancelling order: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing transaction: %w", err)
+	}
+	return nil
+}
+
 // UpdateOrderStatus updates the status of an order.
 func (db *DB) UpdateOrderStatus(ctx context.Context, orderID int64, status string) error {
 	result, err := db.ExecContext(ctx, `
@@ -282,18 +429,12 @@ func (db *DB) UpdateOrderStatus(ctx context.Context, orderID int64, status strin
 	return nil
 }
 
-// FulfillOrder marks an order as fulfilled and deducts inventory atomically.
+// FulfillOrder marks an order as fulfilled. Inventory was already reserved at order time,
+// so no inventory deduction occurs here.
 func (db *DB) FulfillOrder(ctx context.Context, orderID int64) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
 	// Get order details
-	var quantity int
 	var status string
-	err = tx.QueryRowContext(ctx, `SELECT quantity, status FROM orders WHERE id = ?`, orderID).Scan(&quantity, &status)
+	err := db.QueryRowContext(ctx, `SELECT status FROM orders WHERE id = ?`, orderID).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrOrderNotFound
 	}
@@ -305,14 +446,12 @@ func (db *DB) FulfillOrder(ctx context.Context, orderID int64) error {
 		return fmt.Errorf("order already fulfilled")
 	}
 
-	// Deduct inventory
-	result, err := tx.ExecContext(ctx, `
-		UPDATE inventory
-		SET eggs_available = eggs_available - ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = 1 AND eggs_available >= ?
-	`, quantity, quantity)
+	// Update order status (inventory was already deducted at order time)
+	result, err := db.ExecContext(ctx, `
+		UPDATE orders SET status = 'fulfilled', updated_at = CURRENT_TIMESTAMP WHERE id = ?
+	`, orderID)
 	if err != nil {
-		return fmt.Errorf("deducting inventory: %w", err)
+		return fmt.Errorf("updating order: %w", err)
 	}
 
 	rows, err := result.RowsAffected()
@@ -320,19 +459,7 @@ func (db *DB) FulfillOrder(ctx context.Context, orderID int64) error {
 		return fmt.Errorf("checking rows affected: %w", err)
 	}
 	if rows == 0 {
-		return ErrInsufficientInventory
-	}
-
-	// Update order status
-	_, err = tx.ExecContext(ctx, `
-		UPDATE orders SET status = 'fulfilled', updated_at = CURRENT_TIMESTAMP WHERE id = ?
-	`, orderID)
-	if err != nil {
-		return fmt.Errorf("updating order: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction: %w", err)
+		return ErrOrderNotFound
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -130,7 +131,7 @@ func TestOrderCmd(t *testing.T) {
 			name:        "valid order 6 eggs",
 			args:        []string{"6"},
 			wantErr:     false,
-			msgContains: "Order #",
+			msgContains: "eggs reserved",
 		},
 		{
 			name:        "valid order 7 eggs rounds up",
@@ -237,7 +238,10 @@ func TestHistoryCmd(t *testing.T) {
 		t.Errorf("expected no orders message, got %q", result.Message)
 	}
 
-	// Create orders
+	// Add inventory (required for reservation model)
+	_ = database.AddEggs(ctx, 30)
+
+	// Create orders (reserves inventory)
 	_, _ = database.CreateOrder(ctx, c.ID, 6, 3200)
 	_, _ = database.CreateOrder(ctx, c.ID, 12, 6400)
 
@@ -265,6 +269,9 @@ func TestHelpCmd(t *testing.T) {
 	if !strings.Contains(result.Message, "inventory") {
 		t.Error("expected inventory in help")
 	}
+	if !strings.Contains(result.Message, "cancel") {
+		t.Error("expected cancel in help")
+	}
 	if strings.Contains(result.Message, "Admin commands") {
 		t.Error("non-admin should not see admin commands")
 	}
@@ -276,5 +283,109 @@ func TestHelpCmd(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "addcustomer") {
 		t.Error("admin should see addcustomer")
+	}
+}
+
+func TestCancelOrderCmd(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	// Setup: customer, inventory, and order
+	c, _ := database.CreateCustomer(ctx, testCustomerNpub)
+	_ = database.AddEggs(ctx, 20) // Required for reservation model
+	order, _ := database.CreateOrder(ctx, c.ID, 6, 3200)
+
+	tests := []struct {
+		name        string
+		args        []string
+		wantErr     bool
+		errContains string
+		msgContains string
+	}{
+		{
+			name:        "no args",
+			args:        []string{},
+			wantErr:     true,
+			errContains: "usage",
+		},
+		{
+			name:        "invalid order id",
+			args:        []string{"abc"},
+			wantErr:     true,
+			errContains: "must be a number",
+		},
+		{
+			name:        "non-existent order",
+			args:        []string{"99999"},
+			wantErr:     true,
+			errContains: "not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CancelOrderCmd(ctx, database, testCustomerNpub, tt.args)
+			if tt.wantErr {
+				if result.Error == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !strings.Contains(result.Error.Error(), tt.errContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errContains, result.Error.Error())
+				}
+			} else {
+				if result.Error != nil {
+					t.Fatalf("unexpected error: %v", result.Error)
+				}
+				if !strings.Contains(result.Message, tt.msgContains) {
+					t.Errorf("expected message containing %q, got %q", tt.msgContains, result.Message)
+				}
+			}
+		})
+	}
+
+	// Test successful cancellation
+	t.Run("cancel pending order", func(t *testing.T) {
+		result := CancelOrderCmd(ctx, database, testCustomerNpub, []string{fmt.Sprintf("%d", order.ID)})
+		if result.Error != nil {
+			t.Fatalf("unexpected error: %v", result.Error)
+		}
+		if !strings.Contains(result.Message, "cancelled") {
+			t.Errorf("expected cancelled message, got %q", result.Message)
+		}
+	})
+
+	// Test cancelling already cancelled order
+	t.Run("cancel already cancelled", func(t *testing.T) {
+		result := CancelOrderCmd(ctx, database, testCustomerNpub, []string{fmt.Sprintf("%d", order.ID)})
+		if result.Error == nil {
+			t.Fatal("expected error for already cancelled order")
+		}
+		if !strings.Contains(result.Error.Error(), "cannot be cancelled") {
+			t.Errorf("expected cannot be cancelled error, got %v", result.Error)
+		}
+	})
+}
+
+func TestCancelOrderCmd_OwnershipCheck(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	// Setup: two customers
+	c1, _ := database.CreateCustomer(ctx, testCustomerNpub)
+	_, _ = database.CreateCustomer(ctx, testAdminNpub)
+
+	// Add inventory (required for reservation model)
+	_ = database.AddEggs(ctx, 20)
+
+	// Create order for customer 1
+	order, _ := database.CreateOrder(ctx, c1.ID, 6, 3200)
+
+	// Customer 2 (admin npub) tries to cancel customer 1's order
+	result := CancelOrderCmd(ctx, database, testAdminNpub, []string{fmt.Sprintf("%d", order.ID)})
+	if result.Error == nil {
+		t.Fatal("expected error when cancelling another's order")
+	}
+	if !strings.Contains(result.Error.Error(), "your own orders") {
+		t.Errorf("expected ownership error, got %v", result.Error)
 	}
 }

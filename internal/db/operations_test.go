@@ -143,7 +143,10 @@ func TestOrderOperations(t *testing.T) {
 		t.Fatalf("CreateCustomer: %v", err)
 	}
 
-	// Create order
+	// Add inventory (required for order creation in reservation model)
+	_ = db.AddEggs(ctx, 20)
+
+	// Create order (now reserves inventory atomically)
 	order, err := db.CreateOrder(ctx, c.ID, 6, 3200)
 	if err != nil {
 		t.Fatalf("CreateOrder: %v", err)
@@ -194,29 +197,31 @@ func TestFulfillOrder(t *testing.T) {
 	ctx := context.Background()
 	db := setupTestDB(t)
 
-	// Create customer and order
+	// Create customer
 	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
 	c, _ := db.CreateCustomer(ctx, npub)
-	order, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
 
-	// Fulfill without inventory should fail
-	err := db.FulfillOrder(ctx, order.ID)
-	if err != ErrInsufficientInventory {
-		t.Errorf("expected ErrInsufficientInventory, got %v", err)
-	}
-
-	// Add inventory
+	// Add inventory first (required for reservation model)
 	_ = db.AddEggs(ctx, 10)
 
-	// Fulfill should succeed
+	// Create order (reserves 6 eggs, leaving 4)
+	order, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+
+	// Verify inventory was reserved at order time
+	count, _ := db.GetInventory(ctx)
+	if count != 4 {
+		t.Errorf("expected 4 eggs after order reservation, got %d", count)
+	}
+
+	// Fulfill should succeed (no inventory deduction, just status change)
 	if err := db.FulfillOrder(ctx, order.ID); err != nil {
 		t.Fatalf("FulfillOrder: %v", err)
 	}
 
-	// Check inventory deducted
-	count, _ := db.GetInventory(ctx)
+	// Check inventory unchanged (was already deducted at order time)
+	count, _ = db.GetInventory(ctx)
 	if count != 4 {
-		t.Errorf("expected 4 eggs remaining, got %d", count)
+		t.Errorf("expected 4 eggs after fulfill (no change), got %d", count)
 	}
 
 	// Check order status
@@ -226,9 +231,48 @@ func TestFulfillOrder(t *testing.T) {
 	}
 
 	// Fulfill again should fail
-	err = db.FulfillOrder(ctx, order.ID)
+	err := db.FulfillOrder(ctx, order.ID)
 	if err == nil || err.Error() != "order already fulfilled" {
 		t.Errorf("expected already fulfilled error, got %v", err)
+	}
+}
+
+func TestCreateOrder_ReservesInventory(t *testing.T) {
+	ctx := context.Background()
+	db := setupTestDB(t)
+
+	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
+	c, _ := db.CreateCustomer(ctx, npub)
+
+	// No inventory - order should fail
+	_, err := db.CreateOrder(ctx, c.ID, 6, 3200)
+	if err != ErrInsufficientInventory {
+		t.Errorf("expected ErrInsufficientInventory with no inventory, got %v", err)
+	}
+
+	// Add 5 eggs, try to order 6
+	_ = db.AddEggs(ctx, 5)
+	_, err = db.CreateOrder(ctx, c.ID, 6, 3200)
+	if err != ErrInsufficientInventory {
+		t.Errorf("expected ErrInsufficientInventory for 6 eggs with 5 available, got %v", err)
+	}
+
+	// Add 5 more (total 10), order 6 should succeed
+	_ = db.AddEggs(ctx, 5)
+	order, err := db.CreateOrder(ctx, c.ID, 6, 3200)
+	if err != nil {
+		t.Fatalf("CreateOrder should succeed with sufficient inventory: %v", err)
+	}
+
+	// Verify inventory was deducted
+	count, _ := db.GetInventory(ctx)
+	if count != 4 {
+		t.Errorf("expected 4 eggs after reservation, got %d", count)
+	}
+
+	// Verify order created
+	if order.Status != "pending" {
+		t.Errorf("expected pending status, got %s", order.Status)
 	}
 }
 
@@ -263,8 +307,10 @@ func TestTransactionsAndBalance(t *testing.T) {
 		t.Errorf("expected 5000 balance, got %d", balance)
 	}
 
-	// Add inventory and fulfill order to test spent calculation
+	// Add inventory first (required for reservation model)
 	_ = db.AddEggs(ctx, 10)
+
+	// Create and fulfill order to test spent calculation
 	order, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
 	_ = db.FulfillOrder(ctx, order.ID)
 
@@ -294,5 +340,72 @@ func TestOrderNotFound(t *testing.T) {
 	err = db.FulfillOrder(ctx, 99999)
 	if err != ErrOrderNotFound {
 		t.Errorf("expected ErrOrderNotFound, got %v", err)
+	}
+}
+
+func TestCancelOrder(t *testing.T) {
+	ctx := context.Background()
+	db := setupTestDB(t)
+
+	// Create customer
+	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
+	c, _ := db.CreateCustomer(ctx, npub)
+
+	// Add inventory (required for reservation model)
+	_ = db.AddEggs(ctx, 30)
+
+	// Create order (reserves 6 eggs, leaving 24)
+	order, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+
+	// Verify inventory was reserved
+	count, _ := db.GetInventory(ctx)
+	if count != 24 {
+		t.Errorf("expected 24 eggs after order, got %d", count)
+	}
+
+	// Cancel pending order should succeed and restore inventory
+	err := db.CancelOrder(ctx, order.ID)
+	if err != nil {
+		t.Fatalf("CancelOrder: %v", err)
+	}
+
+	// Verify status changed
+	order, _ = db.GetOrderByID(ctx, order.ID)
+	if order.Status != "cancelled" {
+		t.Errorf("expected status cancelled, got %s", order.Status)
+	}
+
+	// Verify inventory was restored
+	count, _ = db.GetInventory(ctx)
+	if count != 30 {
+		t.Errorf("expected 30 eggs after cancel (restored), got %d", count)
+	}
+
+	// Cancel already cancelled order should fail
+	err = db.CancelOrder(ctx, order.ID)
+	if err != ErrOrderNotPending {
+		t.Errorf("expected ErrOrderNotPending, got %v", err)
+	}
+
+	// Cancel non-existent order should fail
+	err = db.CancelOrder(ctx, 99999)
+	if err != ErrOrderNotFound {
+		t.Errorf("expected ErrOrderNotFound, got %v", err)
+	}
+
+	// Cancel paid order should fail
+	order2, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = db.UpdateOrderStatus(ctx, order2.ID, "paid")
+	err = db.CancelOrder(ctx, order2.ID)
+	if err != ErrOrderNotPending {
+		t.Errorf("expected ErrOrderNotPending for paid order, got %v", err)
+	}
+
+	// Cancel fulfilled order should fail
+	order3, _ := db.CreateOrder(ctx, c.ID, 6, 3200)
+	_ = db.FulfillOrder(ctx, order3.ID)
+	err = db.CancelOrder(ctx, order3.ID)
+	if err != ErrOrderNotPending {
+		t.Errorf("expected ErrOrderNotPending for fulfilled order, got %v", err)
 	}
 }

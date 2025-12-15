@@ -107,18 +107,19 @@ func TestDeliverCmd(t *testing.T) {
 			errContains: "customer not found",
 		},
 		{
-			name:        "no pending orders",
+			name:        "no paid orders",
 			args:        []string{testCustomerNpub},
 			setup:       func() {},
 			wantErr:     false,
-			msgContains: "No pending orders",
+			msgContains: "No paid orders to deliver",
 		},
 		{
-			name: "deliver pending order",
+			name: "deliver paid order",
 			args: []string{testCustomerNpub},
 			setup: func() {
 				_ = database.AddEggs(ctx, 10)
-				_, _ = database.CreateOrder(ctx, c.ID, 6, 3200)
+				order, _ := database.CreateOrder(ctx, c.ID, 6, 3200)
+				_ = database.UpdateOrderStatus(ctx, order.ID, "paid") // Must be paid to deliver
 			},
 			wantErr:     false,
 			msgContains: "Delivered 1 orders",
@@ -145,6 +146,62 @@ func TestDeliverCmd(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeliverCmd_OnlyDeliversPaidOrders(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	// Setup customer and inventory
+	c, _ := database.CreateCustomer(ctx, testCustomerNpub)
+	_ = database.AddEggs(ctx, 30)
+
+	// Create orders in different states
+	pendingOrder, _ := database.CreateOrder(ctx, c.ID, 6, 3200)   // status: pending (unpaid)
+	paidOrder, _ := database.CreateOrder(ctx, c.ID, 12, 6400)     // status: paid (will be set below)
+	cancelledOrder, _ := database.CreateOrder(ctx, c.ID, 6, 3200) // status: cancelled (will be set below)
+
+	// Set statuses
+	_ = database.UpdateOrderStatus(ctx, paidOrder.ID, "paid")
+	_ = database.CancelOrder(ctx, cancelledOrder.ID)
+
+	// Deliver - should only deliver the paid order
+	result := DeliverCmd(ctx, database, []string{testCustomerNpub})
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+
+	// Should have delivered 1 order (12 eggs)
+	if !strings.Contains(result.Message, "Delivered 1 orders") {
+		t.Errorf("expected 1 order delivered, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "12 eggs") {
+		t.Errorf("expected 12 eggs, got %q", result.Message)
+	}
+
+	// Verify the paid order is now fulfilled
+	order, _ := database.GetOrderByID(ctx, paidOrder.ID)
+	if order.Status != "fulfilled" {
+		t.Errorf("expected paid order to be fulfilled, got %s", order.Status)
+	}
+
+	// Verify the pending order is still pending (not delivered)
+	order, _ = database.GetOrderByID(ctx, pendingOrder.ID)
+	if order.Status != "pending" {
+		t.Errorf("expected pending order to remain pending, got %s", order.Status)
+	}
+
+	// Verify cancelled order is still cancelled
+	order, _ = database.GetOrderByID(ctx, cancelledOrder.ID)
+	if order.Status != "cancelled" {
+		t.Errorf("expected cancelled order to remain cancelled, got %s", order.Status)
+	}
+
+	// Try delivering again - should have no paid orders
+	result = DeliverCmd(ctx, database, []string{testCustomerNpub})
+	if !strings.Contains(result.Message, "No paid orders to deliver") {
+		t.Errorf("expected no paid orders message, got %q", result.Message)
 	}
 }
 
@@ -346,6 +403,62 @@ func TestAddCustomerCmd(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOrdersCmd(t *testing.T) {
+	ctx := context.Background()
+	database := setupCmdTestDB(t)
+
+	// Empty orders list
+	result := OrdersCmd(ctx, database)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if !strings.Contains(result.Message, "No orders found") {
+		t.Errorf("expected no orders message, got %q", result.Message)
+	}
+
+	// Setup: create customers and inventory
+	c1, _ := database.CreateCustomer(ctx, testCustomerNpub)
+	c2, _ := database.CreateCustomer(ctx, testAdminNpub)
+	_ = database.AddEggs(ctx, 50)
+
+	// Create orders for different customers in different states
+	order1, _ := database.CreateOrder(ctx, c1.ID, 6, 3200)  // pending
+	order2, _ := database.CreateOrder(ctx, c2.ID, 12, 6400) // will be paid
+	_ = database.UpdateOrderStatus(ctx, order2.ID, "paid")
+
+	// List orders
+	result = OrdersCmd(ctx, database)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+
+	// Should show 2 orders
+	if !strings.Contains(result.Message, "2 orders") {
+		t.Errorf("expected 2 orders, got %q", result.Message)
+	}
+
+	// Should show order IDs (format: #1, #2, etc.)
+	if !strings.Contains(result.Message, "#") {
+		t.Errorf("expected order IDs with # prefix, got %q", result.Message)
+	}
+
+	// Should show different statuses
+	if !strings.Contains(result.Message, "pending") {
+		t.Errorf("expected pending status, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "paid") {
+		t.Errorf("expected paid status, got %q", result.Message)
+	}
+
+	// Should truncate npubs
+	if strings.Contains(result.Message, testCustomerNpub) {
+		t.Error("npub should be truncated, not shown in full")
+	}
+
+	// Verify both orders are represented
+	_ = order1 // Ensure we created both orders
 }
 
 func TestRemoveCustomerCmd(t *testing.T) {

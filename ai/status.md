@@ -99,3 +99,60 @@ See `docs/operations/status-spec.md` for format specification.
 - On restart, bot only receives events newer than the high water mark
 - Added `TestHighWaterMark` covering initial value, forward updates, and no-backward-update behavior
 - All tests passing, build successful
+
+### Event ID Deduplication via INSERT OR IGNORE
+- Added migration `004_processed_events.sql` with event_id as PRIMARY KEY
+- Added `TryProcess(eventID, kind, createdAt)` method to db package
+- Uses `INSERT OR IGNORE` for atomic deduplication - returns true (new event) or false (duplicate)
+- Integrated dedup check at top of both DM and zap event handlers in run.go
+- Same event arriving from multiple relays now processed exactly once
+- Complements high water mark (timestamp-based) with event ID-based deduplication
+- Added `TestTryProcess` covering first call, duplicate call, and different event scenarios
+- All tests passing with race detector, build successful
+
+## 2025-12-15
+
+### Inventory Audit & System Sanity Implementation
+
+Completed 5-phase implementation to fix logical inconsistencies in inventory/order management.
+
+**Phase 1: Cancel Command**
+- Added `CmdCancel` constant and routing in parse.go, dispatch.go
+- Implemented `CancelOrderCmd()` in customer_commands.go with ownership verification
+- Added `CancelOrder()` to operations.go - cancels pending orders, restores reserved inventory
+- Added `ErrOrderNotPending` error type
+- Added tests: `TestCancelOrder`, `TestCancelOrderCmd`, `TestCancelOrderCmd_OwnershipCheck`
+
+**Phase 2: Delivery Payment Validation**
+- Modified `DeliverCmd()` to only fulfill orders with status='paid'
+- Added `GetPaidOrdersByCustomer()` to operations.go
+- Pending (unpaid) orders are now skipped during delivery
+- Updated tests: `TestDeliverCmd`, `TestDeliverCmd_OnlyDeliversPaidOrders`
+
+**Phase 3: Inventory Reservation Model**
+- Modified `CreateOrder()` to atomically reserve inventory at order time
+- Modified `FulfillOrder()` to NOT deduct inventory (already reserved)
+- Modified `CancelOrder()` to restore inventory when cancelling
+- Modified `OrderCmd()` message to reflect "eggs reserved" instead of "order created"
+- Updated all tests that create orders to add inventory first
+
+**Phase 4: Admin Orders List Command**
+- Added `CmdOrders` constant and routing
+- Added `OrderWithCustomer` struct and `GetAllOrders()` to operations.go
+- Implemented `OrdersCmd()` - lists all orders across all customers with truncated npubs
+- Added `TestOrdersCmd` test
+- Updated help text with new commands
+
+**Phase 5: Verification**
+- All tests passing with race detector (160 test cases)
+- Build successful
+- Lint warnings in test fixed
+
+**Summary of Bug Fixes**:
+| Issue | Status |
+|-------|--------|
+| Inventory overbooking | FIXED - Reserved at order time |
+| Unverified delivery | FIXED - Only paid orders delivered |
+| No order cancellation | FIXED - Cancel command added |
+| No admin visibility | FIXED - Orders list command added |
+| Cancel doesn't restore inventory | FIXED - Atomic restore on cancel |

@@ -75,3 +75,24 @@ func (db *DB) SetHighWaterMark(ts int64) error {
 	}
 	return nil
 }
+
+// TryProcess attempts to record an event as processed.
+// Returns true if this is a new event (caller should process it).
+// Returns false if the event was already processed (caller should skip it).
+// Uses INSERT OR IGNORE for atomic deduplication.
+func (db *DB) TryProcess(eventID string, kind int, createdAt int64) (bool, error) {
+	result, err := db.Exec(`
+		INSERT OR IGNORE INTO processed_events (event_id, kind, created_at)
+		VALUES (?, ?, ?)
+	`, eventID, kind, createdAt)
+	if err != nil {
+		return false, fmt.Errorf("recording processed event: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("checking rows affected: %w", err)
+	}
+
+	return rows > 0, nil
+}

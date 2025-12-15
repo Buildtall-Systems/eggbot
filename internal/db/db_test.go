@@ -72,3 +72,49 @@ func TestHighWaterMark(t *testing.T) {
 		t.Errorf("high water mark = %d, want 200 (should not decrease)", hwm)
 	}
 }
+
+func TestTryProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+	defer func() {
+		_ = db.Close()
+		_ = os.Remove(dbPath)
+	}()
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("failed to migrate: %v", err)
+	}
+
+	eventID := "abc123def456"
+	kind := 4
+	createdAt := int64(1700000000)
+
+	isNew, err := db.TryProcess(eventID, kind, createdAt)
+	if err != nil {
+		t.Fatalf("TryProcess() error: %v", err)
+	}
+	if !isNew {
+		t.Error("first TryProcess() = false, want true")
+	}
+
+	isNew, err = db.TryProcess(eventID, kind, createdAt)
+	if err != nil {
+		t.Fatalf("TryProcess() error: %v", err)
+	}
+	if isNew {
+		t.Error("second TryProcess() = true, want false (duplicate)")
+	}
+
+	isNew, err = db.TryProcess("different_event", kind, createdAt)
+	if err != nil {
+		t.Fatalf("TryProcess() error: %v", err)
+	}
+	if !isNew {
+		t.Error("TryProcess(different_event) = false, want true")
+	}
+}

@@ -34,7 +34,7 @@ type NostrConfig struct {
 
 // LightningConfig holds Lightning payment settings.
 type LightningConfig struct {
-	LnurlPubkeyNpub  string // LNURL provider's npub (from config)
+	LnurlNpub        string // LNURL provider's npub (from config)
 	LnurlPubkeyHex   string // Derived hex pubkey for zap validation
 	LightningAddress string // Lightning address for payments (e.g., user@getalby.com)
 }
@@ -57,7 +57,7 @@ func Load() (*Config, error) {
 			BotNpub: viper.GetString("nostr.bot_npub"),
 		},
 		Lightning: LightningConfig{
-			LnurlPubkeyNpub:  viper.GetString("lightning.lnurl_pubkey"),
+			LnurlNpub:        viper.GetString("lightning.lnurl_npub"),
 			LightningAddress: viper.GetString("lightning.address"),
 		},
 		Pricing: PricingConfig{
@@ -143,17 +143,17 @@ func LoadWithSecrets() (*Config, error) {
 	}
 
 	// Derive LNURL provider pubkey hex if specified
-	if cfg.Lightning.LnurlPubkeyNpub != "" {
-		lnPrefix, lnValue, err := nip19.Decode(cfg.Lightning.LnurlPubkeyNpub)
+	if cfg.Lightning.LnurlNpub != "" {
+		lnPrefix, lnValue, err := nip19.Decode(cfg.Lightning.LnurlNpub)
 		if err != nil {
-			return nil, fmt.Errorf("invalid lightning.lnurl_pubkey: %w", err)
+			return nil, fmt.Errorf("invalid lightning.lnurl_npub: %w", err)
 		}
 		if lnPrefix != "npub" {
-			return nil, fmt.Errorf("lightning.lnurl_pubkey must be an npub, got %s", lnPrefix)
+			return nil, fmt.Errorf("lightning.lnurl_npub must be an npub, got %s", lnPrefix)
 		}
 		lnPubkeyHex, ok := lnValue.(string)
 		if !ok {
-			return nil, fmt.Errorf("failed to decode lnurl_pubkey npub value")
+			return nil, fmt.Errorf("failed to decode lnurl_npub value")
 		}
 		cfg.Lightning.LnurlPubkeyHex = lnPubkeyHex
 	}

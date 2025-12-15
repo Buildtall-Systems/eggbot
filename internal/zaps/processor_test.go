@@ -151,7 +151,10 @@ func TestProcessZap_AutoMarkPaid(t *testing.T) {
 		t.Fatalf("creating customer: %v", err)
 	}
 
-	// Create a pending order for 3200 sats
+	// Add inventory (required for reservation model)
+	_ = database.AddEggs(ctx, 10)
+
+	// Create a pending order for 3200 sats (reserves inventory)
 	order, err := database.CreateOrder(ctx, customer.ID, 6, 3200)
 	if err != nil {
 		t.Fatalf("creating order: %v", err)
@@ -196,7 +199,10 @@ func TestProcessZap_InsufficientForOrder(t *testing.T) {
 		t.Fatalf("creating customer: %v", err)
 	}
 
-	// Create a pending order for 3200 sats
+	// Add inventory (required for reservation model)
+	_ = database.AddEggs(ctx, 10)
+
+	// Create a pending order for 3200 sats (reserves inventory)
 	order, err := database.CreateOrder(ctx, customer.ID, 6, 3200)
 	if err != nil {
 		t.Fatalf("creating order: %v", err)

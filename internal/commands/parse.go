@@ -15,6 +15,7 @@ const (
 	// Customer commands
 	CmdInventory = "inventory"
 	CmdOrder     = "order"
+	CmdCancel    = "cancel"
 	CmdBalance   = "balance"
 	CmdHistory   = "history"
 	CmdHelp      = "help"
@@ -24,6 +25,7 @@ const (
 	CmdDeliver        = "deliver"
 	CmdPayment        = "payment"
 	CmdAdjust         = "adjust"
+	CmdOrders         = "orders"
 	CmdCustomers      = "customers"
 	CmdAddCustomer    = "addcustomer"
 	CmdRemoveCustomer = "removecustomer"
@@ -69,7 +71,7 @@ func stripMarkdownComments(content string) string {
 // IsCustomerCommand returns true if the command is available to customers.
 func (c *Command) IsCustomerCommand() bool {
 	switch c.Name {
-	case CmdInventory, CmdOrder, CmdBalance, CmdHistory, CmdHelp:
+	case CmdInventory, CmdOrder, CmdCancel, CmdBalance, CmdHistory, CmdHelp:
 		return true
 	default:
 		return false
@@ -79,7 +81,7 @@ func (c *Command) IsCustomerCommand() bool {
 // IsAdminCommand returns true if the command requires admin privileges.
 func (c *Command) IsAdminCommand() bool {
 	switch c.Name {
-	case CmdAdd, CmdDeliver, CmdPayment, CmdAdjust, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer:
+	case CmdAdd, CmdDeliver, CmdPayment, CmdAdjust, CmdOrders, CmdCustomers, CmdAddCustomer, CmdRemoveCustomer:
 		return true
 	default:
 		return false
