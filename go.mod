@@ -3,6 +3,7 @@ module github.com/buildtall-systems/eggbot
 go 1.25
 
 require (
+	github.com/looplab/fsm v1.0.3
 	github.com/nbd-wtf/go-nostr v0.52.3
 	github.com/pressly/goose/v3 v3.22.1
 	github.com/spf13/cobra v1.8.1
@@ -30,7 +31,6 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/looplab/fsm v1.0.3 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

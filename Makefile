@@ -1,4 +1,4 @@
-.PHONY: help build dev test clean lint install tidy
+.PHONY: help build dev test clean lint install tidy vendor
 
 BINARY_NAME=eggbot
 VERSION?=dev
@@ -14,6 +14,7 @@ help:
 	@echo "  make test       - Run tests"
 	@echo "  make lint       - Run linter"
 	@echo "  make tidy       - Tidy go modules"
+	@echo "  make vendor     - Vendor dependencies for nix build"
 	@echo "  make clean      - Clean build artifacts"
 	@echo "  make install    - Install binary to GOPATH/bin"
 
@@ -37,3 +38,7 @@ clean:
 
 install: build
 	go install ${LDFLAGS} ./cmd/${BINARY_NAME}
+
+vendor:
+	go mod tidy
+	go mod vendor
