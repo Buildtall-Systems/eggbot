@@ -1,3 +1,5 @@
+![Eggbot](static/eggbot-avatar-sm.png)
+
 # Eggbot
 
 A sales bot for small-scale egg producers who want to accept Bitcoin payments without payment processors, platform fees, or middlemen.

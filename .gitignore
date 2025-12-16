@@ -9,4 +9,3 @@ tmp/*
 .env.local
 /eggbot
 result
-static/
