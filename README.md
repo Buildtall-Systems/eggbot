@@ -1,29 +1,122 @@
 # Eggbot
 
-Nostr egg sales bot. Manages inventory, customer orders, and accepts Lightning zap payments via encrypted DMs.
+A sales bot for small-scale egg producers who want to accept Bitcoin payments without payment processors, platform fees, or middlemen.
 
 ## Overview
 
-Eggbot is a Nostr bot that operates via NIP-17 encrypted direct messages. Customers send commands to order eggs and check their balance. The bot accepts Lightning zaps for payment and automatically credits customer accounts.
+Eggbot enables peer-to-peer commerce over Nostr, a decentralized social protocol. Customers interact with the bot through encrypted direct messages to check inventory, place orders, and view their payment history. When a customer places an order, they pay with Bitcoin over the Lightning Network. The bot tracks payments automatically and updates order status in real time.
 
-**Features**:
-- Encrypted DM communication (NIP-17 gift wrap)
-- Lightning zap payment acceptance (NIP-57)
-- Bolt11 invoice generation via LNURL-pay (clickable in Amethyst)
-- SQLite database for inventory, orders, and transactions
-- Customer whitelist for access control
-- Admin commands for inventory and order management
+The system combines three technologies:
+
+- **Nostr** is a decentralized protocol for communication. Messages are cryptographically signed and delivered through relays (servers that forward messages). There's no central authority; anyone can run a relay, and users control their own identity through public/private key pairs.
+
+- **Encrypted DMs** ensure that conversations between customers and the bot remain private. Even the relays that forward messages cannot read their contents.
+
+- **Lightning zaps** are Bitcoin micropayments native to Nostr. When a customer "zaps" the bot, the payment creates a cryptographic receipt that the bot can verify and credit to their account.
+
+Because everything runs on open protocols, there's no platform risk. The bot operator controls their own infrastructure, customers control their own identity, and payments flow directly between parties.
+
+## Commands
+
+Customers interact with Eggbot by sending text commands via direct message. Any Nostr client that supports encrypted DMs will work (Amethyst, Coracle, Damus, and others).
+
+### Customer Commands
+
+Registered customers can use these commands:
+
+| Command | Description |
+|---------|-------------|
+| `help` | Show available commands |
+| `inventory` | Check how many eggs are available |
+| `order 6` or `order 12` | Order a half-dozen or dozen eggs |
+| `balance` | Check your payment balance |
+| `history` | View your last 25 orders |
+| `cancel <order_id>` | Cancel a pending order |
+
+### Admin Commands
+
+Administrators have additional commands for managing inventory, customers, and orders. Admin status is granted by adding a user's public key to the bot's configuration.
+
+**Inventory management:**
+
+| Command | Description |
+|---------|-------------|
+| `inventory` | Show detailed breakdown: available, reserved, sold, on-hand |
+| `inventory add <qty>` | Add eggs to inventory |
+| `inventory set <qty>` | Set inventory to exact count |
+
+**Order fulfillment:**
+
+| Command | Description |
+|---------|-------------|
+| `orders` | List all orders across all customers |
+| `deliver <order_id>` | Mark an order as delivered |
+
+**Customer management:**
+
+| Command | Description |
+|---------|-------------|
+| `customers` | List all registered customers |
+| `addcustomer <npub>` | Register a new customer by their public key |
+| `removecustomer <npub>` | Remove a customer |
+
+**Payment adjustments:**
+
+| Command | Description |
+|---------|-------------|
+| `sales` | Show total sales in satoshis |
+| `payment <npub> <sats>` | Record a manual payment |
+| `adjust <npub> <sats>` | Adjust a customer's balance (positive or negative) |
+
+## Payment Flow
+
+When a customer places an order, the bot initiates a payment and fulfillment cycle. Understanding this flow is essential for both customers and operators.
+
+### The Order-to-Delivery Cycle
+
+1. **Order placed**: Customer sends `order 12` via encrypted DM. The bot creates a pending order, reserves the eggs from inventory, and responds with an order summary, the price in satoshis, and payment instructions.
+
+2. **Payment instructions**: The response includes two payment options:
+   - A Lightning invoice (a one-time payment request that can be paid from any Lightning wallet)
+   - The bot's public key for zap payments
+
+3. **Customer pays**: The customer sends Bitcoin via Lightning. Zaps are the recommended method because they generate a cryptographic receipt (defined by the NIP-57 protocol) that the bot can automatically verify and credit.
+
+4. **Balance credited**: When the bot receives a valid zap receipt, it credits the customer's account. The customer's balance represents the difference between what they've paid and what they've spent on orders.
+
+5. **Order marked paid**: Once a customer's balance covers their pending orders, those orders are automatically marked as paid.
+
+6. **Physical delivery**: The operator delivers the eggs and uses `deliver <order_id>` to mark the order complete. This moves the eggs from "sold" to "delivered" in inventory tracking.
+
+### Why Zaps Over Direct Invoice Payment
+
+Lightning invoices can be paid directly from any wallet, but these payments are invisible to the bot. They go to the operator's Lightning address without generating a Nostr receipt. The operator would need to manually credit the customer using the `payment` command.
+
+Zaps, by contrast, create a signed receipt on Nostr that proves who paid, how much, and when. The bot subscribes to these receipts and automatically credits payments. This is the recommended workflow.
 
 ## Build
+
+The project uses Nix for reproducible builds:
 
 ```bash
 nix develop
 make build
 ```
 
-Binary output: `bin/eggbot`
+This produces the binary at `bin/eggbot`.
 
 ## Configuration
+
+Eggbot requires two configuration files: a YAML config for settings and an environment file for secrets.
+
+### Understanding Nostr Keys
+
+Before configuring the bot, it helps to understand Nostr's key system:
+
+- **npub** (public key): A user's public identity, shareable with anyone. Customers use this to send messages to the bot.
+- **nsec** (secret key): The private key that proves ownership of an npub. Never share this. The bot needs its nsec to sign messages and decrypt DMs.
+
+Both are bech32-encoded strings (npub1... and nsec1...) derived from the same underlying keypair.
 
 ### Config File
 
@@ -44,18 +137,20 @@ nostr:
 lightning:
   # LNURL provider pubkey that signs zap receipts
   # Leave empty to accept zaps from any provider (less secure)
-  lnurl_pubkey: "npub1..."  # e.g., getalby's npub
+  lnurl_pubkey: "npub1..."  # e.g., Alby's npub
   # Lightning address for invoice generation (optional)
-  # If set, order confirmations include a clickable bolt11 invoice
+  # If set, order confirmations include a clickable Lightning invoice
   address: "eggbot@getalby.com"
 
 pricing:
   sats_per_half_dozen: 3200
 
-# Admin npubs (can manage inventory, customers, orders)
+# Admin public keys (can manage inventory, customers, orders)
 admins:
   - "npub1..."
 ```
+
+The `lightning.lnurl_pubkey` setting is a security measure. When set, the bot only accepts zap receipts signed by that specific Lightning provider (like Alby). This prevents spoofed zap receipts. Leave it empty to accept zaps from any provider, but understand this is less secure.
 
 ### Environment File
 
@@ -66,12 +161,13 @@ Create `/etc/eggbot/eggbot.env`:
 EGGBOT_NSEC=nsec1...
 ```
 
-**Security**: Keep `eggbot.env` readable only by the eggbot user. Never commit nsec to version control.
+**Security**: This file contains the bot's private key. Keep it readable only by the eggbot user (`chmod 600`). Never commit it to version control.
 
-### Generate Bot Identity
+### Generating a Bot Identity
+
+Use `nak` (a Nostr command-line tool) to generate a new keypair:
 
 ```bash
-# Generate keypair using nak
 SK=$(nak key generate)
 NSEC=$(nak encode nsec $SK)
 NPUB=$(nak encode npub $(echo $SK | nak key public))
@@ -80,7 +176,9 @@ echo "npub: $NPUB"
 echo "nsec: $NSEC"  # Store securely in eggbot.env
 ```
 
-### Publish Bot Profile
+### Publishing the Bot's Profile
+
+Once you have keys, publish a profile so customers can find the bot:
 
 ```bash
 nak event -k 0 --sec $SK -c '{
@@ -89,6 +187,8 @@ nak event -k 0 --sec $SK -c '{
   "lud16": "eggbot@getalby.com"
 }' wss://relay.damus.io
 ```
+
+The `lud16` field is the bot's Lightning address, enabling zap payments directly from Nostr clients.
 
 ## Installation
 
@@ -141,7 +241,7 @@ sudo systemctl daemon-reload
 }
 ```
 
-2. Create a module with service options (or add to existing module):
+2. Create a module with service options:
 
 ```nix
 # eggbot-module.nix
@@ -223,10 +323,9 @@ in
 4. Create config files (must be done manually after first deploy):
 
 ```bash
-# Create config directory
 sudo mkdir -p /etc/eggbot
 
-# Create config file (see Configuration section above)
+# Create config file (see Configuration section)
 sudo vim /etc/eggbot/config.yaml
 
 # Create env file with nsec
@@ -234,7 +333,6 @@ sudo touch /etc/eggbot/eggbot.env
 sudo chmod 600 /etc/eggbot/eggbot.env
 echo "EGGBOT_NSEC=nsec1..." | sudo tee /etc/eggbot/eggbot.env
 
-# Make config readable by eggbot user
 sudo chown eggbot:eggbot /etc/eggbot/config.yaml
 ```
 
@@ -250,107 +348,43 @@ sudo systemctl status eggbot
 ### Development
 
 ```bash
-# Set environment
 export EGGBOT_NSEC=nsec1...
-
-# Run with dev config
 ./bin/eggbot run --config configs/dev.yaml
 ```
 
 ### Production (systemd)
 
 ```bash
-# Start service
 sudo systemctl start eggbot
-
-# Enable on boot
-sudo systemctl enable eggbot
-
-# Check status
-sudo systemctl status eggbot
-
-# View logs
-journalctl -u eggbot -f
+sudo systemctl enable eggbot   # Start on boot
+sudo systemctl status eggbot   # Check status
+journalctl -u eggbot -f        # Follow logs
 ```
-
-## Commands
-
-### Customer Commands
-
-Any registered customer can use:
-
-| Command | Description |
-|---------|-------------|
-| `inventory` | Check egg availability |
-| `order <6\|12>` | Order eggs (half-dozen or dozen) |
-| `cancel <order_id>` | Cancel a pending order |
-| `balance` | Check payment balance (received - spent) |
-| `history` | View last 5 orders |
-| `help` | Show available commands |
-
-### Admin Commands
-
-Only npubs in the `admins` config list can use:
-
-| Command | Description |
-|---------|-------------|
-| `inventory` | Show breakdown: available, reserved (pending), sold (paid), on-hand |
-| `inventory add <qty>` | Add eggs to inventory |
-| `inventory set <qty>` | Set inventory to exact count |
-| `deliver <order_id>` | Fulfill a specific paid order |
-| `payment <npub> <sats>` | Record manual payment |
-| `adjust <npub> <sats>` | Adjust customer balance (+/-) |
-| `orders` | List all orders (all customers) |
-| `customers` | List all registered customers |
-| `addcustomer <npub>` | Register new customer |
-| `removecustomer <npub>` | Remove customer |
-| `sales` | Show total sales in sats |
-
-## Payment Flow
-
-1. Customer sends `order 12` via encrypted DM
-2. Bot creates pending order and responds with:
-   - Order summary and price
-   - Bolt11 invoice (clickable in Amethyst, if lightning address configured)
-   - Bot's npub for zap payments
-3. Customer pays via:
-   - **Option A**: Pay the bolt11 invoice directly (not tracked by bot)
-   - **Option B**: Zap the bot's npub (recommended - generates trackable receipt)
-4. If zapped: Bot receives zap receipt, validates it, credits customer balance
-5. When balance covers pending orders, orders are marked as paid
-6. Admin uses `deliver <order_id>` when physically delivering eggs (see order IDs in `orders` list)
-
-**Note**: Direct invoice payments are not tracked by the bot. Zaps are the recommended payment method because they generate NIP-57 receipts that the bot can verify and credit.
 
 ## Testing
 
 ```bash
-# Run all tests with race detector
-make test
-
-# Run linter
-make lint
-
-# Run specific test
-go test -v ./internal/commands/...
+make test    # Run all tests with race detector
+make lint    # Run linter
+go test -v ./internal/commands/...  # Run specific tests
 ```
 
-### Send Test DM
+### Sending a Test DM
 
-Using nak:
+Using `nak`:
 
 ```bash
-# Get bot's hex pubkey
+# Get bot's hex pubkey from its npub
 BOT_HEX=$(nak decode npub1... | jq -r .data)
 
-# Send encrypted DM (NIP-17)
+# Send encrypted DM (NIP-17 gift wrap format)
 echo "inventory" | nak event -k 14 --sec $YOUR_SK -p $BOT_HEX | \
   nak encrypt -k 14 --sec $YOUR_SK $BOT_HEX | \
   nak event -k 1059 --sec $(nak key generate) | \
   nak publish wss://relay.damus.io
 ```
 
-Or use a Nostr client that supports NIP-17 DMs (Coracle, Amethyst, etc.).
+Or use any Nostr client that supports NIP-17 encrypted DMs (Coracle, Amethyst, etc.).
 
 ## Troubleshooting
 
@@ -361,22 +395,23 @@ Or use a Nostr client that supports NIP-17 DMs (Coracle, Amethyst, etc.).
    journalctl -u eggbot | grep "connected\|error"
    ```
 
-2. Verify bot pubkey matches config:
+2. Verify the bot's public key in config matches its actual identity:
    ```bash
    nak decode $BOT_NPUB
    ```
 
-3. Ensure sender is registered as customer
+3. Ensure the sender is a registered customer.
 
 ### Zaps not credited
 
-1. Verify `lightning.lnurl_pubkey` matches your LNURL provider
-2. Check zap validation errors in logs:
+1. Verify `lightning.lnurl_pubkey` matches your Lightning provider's public key.
+
+2. Check for zap validation errors:
    ```bash
    journalctl -u eggbot | grep -i zap
    ```
 
-3. Ensure sender is a registered customer
+3. Ensure the sender is a registered customer (zaps from unregistered users are ignored).
 
 ### Database errors
 
@@ -385,16 +420,16 @@ Or use a Nostr client that supports NIP-17 DMs (Coracle, Amethyst, etc.).
    ls -la /var/lib/eggbot/
    ```
 
-2. Verify database path is writable by eggbot user
+2. Verify the database path is writable by the eggbot user.
 
 ### Service won't start
 
-1. Check config syntax:
+1. Test config syntax by running manually:
    ```bash
    eggbot run --config /etc/eggbot/config.yaml --verbose
    ```
 
-2. Verify EGGBOT_NSEC is set:
+2. Verify the nsec is set:
    ```bash
    sudo -u eggbot cat /etc/eggbot/eggbot.env
    ```

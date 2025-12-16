@@ -282,7 +282,7 @@ func HistoryCmd(ctx context.Context, database *db.DB, senderNpub string) Result 
 		return Result{Error: fmt.Errorf("looking up customer: %w", err)}
 	}
 
-	orders, err := database.GetCustomerOrders(ctx, customer.ID, 5)
+	orders, err := database.GetCustomerOrders(ctx, customer.ID, 25)
 	if err != nil {
 		return Result{Error: fmt.Errorf("getting orders: %w", err)}
 	}
