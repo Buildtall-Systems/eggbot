@@ -52,7 +52,9 @@ Administrators have additional commands for managing inventory, customers, and o
 | Command | Description |
 |---------|-------------|
 | `orders` | List all orders across all customers |
-| `deliver <order_id>` | Mark an order as delivered |
+| `sell <npub> <qty>` | Create an order for a customer |
+| `markpaid <order_id>` | Mark a pending order as paid |
+| `deliver <order_id>` | Mark a paid order as delivered |
 
 **Customer management:**
 
@@ -62,12 +64,11 @@ Administrators have additional commands for managing inventory, customers, and o
 | `addcustomer <npub>` | Register a new customer by their public key |
 | `removecustomer <npub>` | Remove a customer |
 
-**Payment adjustments:**
+**Balance adjustments:**
 
 | Command | Description |
 |---------|-------------|
 | `sales` | Show total sales in satoshis |
-| `payment <npub> <sats>` | Record a manual payment |
 | `adjust <npub> <sats>` | Adjust a customer's balance (positive or negative) |
 
 ## Payment Flow

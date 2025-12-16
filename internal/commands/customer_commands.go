@@ -314,10 +314,11 @@ func HelpCmd(isAdmin bool) Result {
 Admin commands:
 • inventory add <qty> - Add eggs to inventory
 • inventory set <qty> - Set inventory to exact count
-• deliver <order_id> - Fulfill a specific paid order
-• payment <npub> <sats> - Record manual payment
+• sell <npub> <qty> - Create order for a customer
+• markpaid <order_id> - Mark pending order as paid
+• deliver <order_id> - Fulfill a paid order
 • adjust <npub> <sats> - Adjust customer balance
-• orders - List all orders (all customers)
+• orders - List all orders
 • customers - List registered customers
 • addcustomer <npub> - Register new customer
 • removecustomer <npub> - Remove customer

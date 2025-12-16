@@ -45,8 +45,8 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub stri
 	case CmdDeliver:
 		return DeliverCmd(ctx, database, cmd.Args)
 
-	case CmdPayment:
-		return PaymentCmd(ctx, database, cmd.Args)
+	case CmdMarkpaid:
+		return MarkpaidCmd(ctx, database, cmd.Args)
 
 	case CmdAdjust:
 		return AdjustCmd(ctx, database, cmd.Args)
@@ -65,6 +65,9 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub stri
 
 	case CmdSales:
 		return SalesCmd(ctx, database)
+
+	case CmdSell:
+		return SellCmd(ctx, database, cmd.Args, cfg.SatsPerHalfDozen)
 
 	default:
 		return HelpCmd(isAdmin)

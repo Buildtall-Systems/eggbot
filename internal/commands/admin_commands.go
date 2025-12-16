@@ -58,46 +58,38 @@ func DeliverCmd(ctx context.Context, database *db.DB, args []string) Result {
 	return Result{Message: fmt.Sprintf("Delivered order %d: %d eggs to %s", orderID, order.Quantity, npubShort)}
 }
 
-// PaymentCmd records a manual payment for a customer.
-// Args: [npub] [amount_sats]
-func PaymentCmd(ctx context.Context, database *db.DB, args []string) Result {
-	if len(args) < 2 {
-		return Result{Error: errors.New("usage: payment <npub> <sats>")}
+// MarkpaidCmd marks a pending order as paid.
+// Args: [order_id]
+func MarkpaidCmd(ctx context.Context, database *db.DB, args []string) Result {
+	if len(args) < 1 {
+		return Result{Error: errors.New("usage: markpaid <order_id>")}
 	}
 
-	npub := args[0]
-	if !strings.HasPrefix(npub, "npub1") {
-		return Result{Error: errors.New("invalid npub format")}
+	orderID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return Result{Error: errors.New("order_id must be a number")}
 	}
 
-	amount, err := strconv.ParseInt(args[1], 10, 64)
-	if err != nil || amount < 1 {
-		return Result{Error: errors.New("amount must be a positive number")}
-	}
-
-	// Validate npub
-	prefix, _, err := nip19.Decode(npub)
-	if err != nil || prefix != "npub" {
-		return Result{Error: errors.New("invalid npub")}
-	}
-
-	// Verify customer exists
-	_, err = database.GetCustomerByNpub(ctx, npub)
-	if errors.Is(err, db.ErrCustomerNotFound) {
-		return Result{Error: errors.New("customer not found")}
+	// Get the order
+	order, err := database.GetOrderByID(ctx, orderID)
+	if errors.Is(err, db.ErrOrderNotFound) {
+		return Result{Error: fmt.Errorf("order %d not found", orderID)}
 	}
 	if err != nil {
-		return Result{Error: fmt.Errorf("looking up customer: %w", err)}
+		return Result{Error: fmt.Errorf("looking up order: %w", err)}
 	}
 
-	// Record transaction with a synthetic event ID
-	eventID := fmt.Sprintf("manual-%d", amount)
-	_, err = database.RecordTransaction(ctx, nil, eventID, amount, npub)
-	if err != nil {
-		return Result{Error: fmt.Errorf("recording payment: %w", err)}
+	// Verify order is pending
+	if order.Status != "pending" {
+		return Result{Error: fmt.Errorf("order %d is %s, not pending", orderID, order.Status)}
 	}
 
-	return Result{Message: fmt.Sprintf("Recorded payment of %d sats for %s", amount, npub)}
+	// Mark as paid
+	if err := database.UpdateOrderStatus(ctx, orderID, "paid"); err != nil {
+		return Result{Error: fmt.Errorf("marking order paid: %w", err)}
+	}
+
+	return Result{Message: fmt.Sprintf("Order %d marked as paid (%d eggs, %d sats)", orderID, order.Quantity, order.TotalSats)}
 }
 
 // AdjustCmd adjusts a customer's balance (can be negative).
@@ -261,5 +253,64 @@ func SalesCmd(ctx context.Context, database *db.DB) Result {
 	}
 
 	return Result{Message: fmt.Sprintf("Total sales: %d sats", total)}
+}
+
+// SellCmd creates an order on behalf of a customer.
+// Args: [npub] [quantity]
+func SellCmd(ctx context.Context, database *db.DB, args []string, satsPerHalfDozen int) Result {
+	if len(args) < 2 {
+		return Result{Error: errors.New("usage: sell <npub> <quantity> (6 or 12)")}
+	}
+
+	npub := args[0]
+	if !strings.HasPrefix(npub, "npub1") {
+		return Result{Error: errors.New("invalid npub format")}
+	}
+
+	// Validate npub
+	prefix, _, err := nip19.Decode(npub)
+	if err != nil || prefix != "npub" {
+		return Result{Error: errors.New("invalid npub")}
+	}
+
+	quantity, err := strconv.Atoi(args[1])
+	if err != nil {
+		return Result{Error: errors.New("quantity must be 6 or 12")}
+	}
+
+	if quantity != 6 && quantity != 12 {
+		return Result{Error: errors.New("quantity must be 6 or 12")}
+	}
+
+	// Get customer
+	customer, err := database.GetCustomerByNpub(ctx, npub)
+	if errors.Is(err, db.ErrCustomerNotFound) {
+		return Result{Error: errors.New("customer not found")}
+	}
+	if err != nil {
+		return Result{Error: fmt.Errorf("looking up customer: %w", err)}
+	}
+
+	// Calculate price
+	halfDozens := quantity / 6
+	totalSats := int64(halfDozens * satsPerHalfDozen)
+
+	// Create order (reserves inventory atomically)
+	order, err := database.CreateOrder(ctx, customer.ID, quantity, totalSats)
+	if err != nil {
+		if errors.Is(err, db.ErrInsufficientInventory) {
+			available, _ := database.GetInventory(ctx)
+			return Result{Error: fmt.Errorf("only %d eggs available, cannot sell %d", available, quantity)}
+		}
+		return Result{Error: fmt.Errorf("creating order: %w", err)}
+	}
+
+	// Truncate npub for display
+	npubShort := npub
+	if len(npubShort) > 20 {
+		npubShort = npubShort[:12] + "..." + npubShort[len(npubShort)-4:]
+	}
+
+	return Result{Message: fmt.Sprintf("Created order #%d: %d eggs for %s (%d sats, pending)", order.ID, quantity, npubShort, totalSats)}
 }
 

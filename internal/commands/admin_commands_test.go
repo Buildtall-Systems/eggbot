@@ -128,11 +128,13 @@ func TestDeliverCmd_VerifiesOrderStateChange(t *testing.T) {
 	}
 }
 
-func TestPaymentCmd(t *testing.T) {
+func TestMarkpaidCmd(t *testing.T) {
 	ctx := context.Background()
 	database := setupCmdTestDB(t)
 
-	_, _ = database.CreateCustomer(ctx, testCustomerNpub)
+	customer, _ := database.CreateCustomer(ctx, testCustomerNpub)
+	_ = database.AddEggs(ctx, 12)
+	pendingOrder, _ := database.CreateOrder(ctx, customer.ID, 6, 3200)
 
 	tests := []struct {
 		name        string
@@ -148,28 +150,28 @@ func TestPaymentCmd(t *testing.T) {
 			errContains: "usage",
 		},
 		{
-			name:        "missing amount",
-			args:        []string{testCustomerNpub},
+			name:        "invalid order id",
+			args:        []string{"abc"},
 			wantErr:     true,
-			errContains: "usage",
+			errContains: "must be a number",
 		},
 		{
-			name:        "invalid amount",
-			args:        []string{testCustomerNpub, "abc"},
+			name:        "order not found",
+			args:        []string{"9999"},
 			wantErr:     true,
-			errContains: "positive number",
+			errContains: "not found",
 		},
 		{
-			name:        "valid payment",
-			args:        []string{testCustomerNpub, "5000"},
+			name:        "mark pending order as paid",
+			args:        []string{fmt.Sprintf("%d", pendingOrder.ID)},
 			wantErr:     false,
-			msgContains: "Recorded payment of 5000 sats",
+			msgContains: "marked as paid",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := PaymentCmd(ctx, database, tt.args)
+			result := MarkpaidCmd(ctx, database, tt.args)
 			if tt.wantErr {
 				if result.Error == nil {
 					t.Fatal("expected error")

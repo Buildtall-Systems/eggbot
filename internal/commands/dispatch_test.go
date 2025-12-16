@@ -137,7 +137,7 @@ func TestExecute_AllCommands(t *testing.T) {
 
 	commands := []string{
 		CmdInventory, CmdOrder, CmdBalance, CmdHistory, CmdHelp,
-		CmdDeliver, CmdPayment, CmdAdjust,
+		CmdDeliver, CmdMarkpaid, CmdAdjust,
 		CmdCustomers, CmdAddCustomer, CmdRemoveCustomer,
 	}
 
@@ -148,9 +148,11 @@ func TestExecute_AllCommands(t *testing.T) {
 			switch cmdName {
 			case CmdOrder:
 				args = []string{"1"}
-			case CmdDeliver, CmdAddCustomer, CmdRemoveCustomer:
+			case CmdDeliver, CmdMarkpaid:
+				args = []string{"1"} // order_id
+			case CmdAddCustomer, CmdRemoveCustomer:
 				args = []string{testCustomerNpub}
-			case CmdPayment, CmdAdjust:
+			case CmdAdjust:
 				args = []string{testCustomerNpub, "100"}
 			}
 
