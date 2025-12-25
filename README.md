@@ -18,6 +18,80 @@ The system combines three technologies:
 
 Because everything runs on open protocols, there's no platform risk. The bot operator controls their own infrastructure, customers control their own identity, and payments flow directly between parties.
 
+## State Machines
+
+Eggbot uses three finite state machines to enforce business logic. Invalid transitions are rejected before any database changes occur.
+
+### Order Lifecycle
+
+Orders progress through a linear lifecycle: created pending, paid via zap, then fulfilled on delivery. Cancellation is only possible before payment.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeCSS': '.edgeLabel { padding: 6px 14px; display: inline-block; background: #161821; border-radius: 12px; }', 'themeVariables': { 'primaryColor': '#1e2132', 'primaryTextColor': '#c6c8d1', 'primaryBorderColor': '#84a0c6', 'lineColor': '#6b7089', 'background': '#161821', 'edgeLabelBackground': 'transparent', 'clusterBkg': '#161821'}}}%%
+flowchart TD
+    classDef state fill:#1e2132,stroke:#84a0c6,stroke-width:2px,color:#c6c8d1,rx:8,ry:8
+    classDef terminal fill:#6b7089,stroke:#84a0c6,stroke-width:2px,color:#c6c8d1,rx:50,ry:50
+
+    START(( )) --> pending
+    pending -->|pay| paid
+    pending -->|cancel| cancelled
+    paid -->|fulfill| fulfilled
+    fulfilled --> END(( ))
+    cancelled --> END2(( ))
+
+    class pending,paid,fulfilled,cancelled state
+    class START,END,END2 terminal
+
+    linkStyle default stroke:#6b7089,stroke-width:2px
+```
+
+### Inventory States
+
+Each egg unit tracks whether it's available for sale, reserved by a pending/paid order, or consumed (delivered). Cancellation restores reserved inventory.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeCSS': '.edgeLabel { background: none !important; } .labelBkg { fill: none !important; opacity: 0 !important; } .edgePath .label rect { fill: none !important; } rect.labelBkg { fill: none !important; }', 'themeVariables': { 'primaryColor': '#1e2132', 'primaryTextColor': '#c6c8d1', 'primaryBorderColor': '#84a0c6', 'lineColor': '#6b7089', 'background': '#161821', 'edgeLabelBackground': 'transparent', 'clusterBkg': '#161821'}}}%%
+flowchart TD
+    classDef state fill:#1e2132,stroke:#84a0c6,stroke-width:2px,color:#c6c8d1,rx:8,ry:8
+    classDef terminal fill:#6b7089,stroke:#84a0c6,stroke-width:2px,color:#c6c8d1,rx:50,ry:50
+
+    START(( )) -->|add| available
+    available -->|reserve| reserved
+    reserved -->|consume| consumed
+    reserved -->|restore| available
+    consumed --> END(( ))
+
+    class available,reserved,consumed state
+    class START,END terminal
+
+    linkStyle default stroke:#6b7089,stroke-width:2px
+```
+
+### Event Processor
+
+The bot processes one event at a time. DMs require command parsing and response; zaps are processed and acknowledged. Any error resets to idle.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#1e2132', 'primaryTextColor': '#c6c8d1', 'primaryBorderColor': '#84a0c6', 'lineColor': '#6b7089', 'background': '#161821', 'edgeLabelBackground': 'transparent', 'clusterBkg': '#161821'}}}%%
+flowchart TD
+    classDef state fill:#1e2132,stroke:#84a0c6,stroke-width:2px,color:#c6c8d1,rx:8,ry:8
+    classDef errorLink stroke:#e27878,stroke-width:2px
+
+    idle -->|dm_received| processing_dm
+    idle -->|zap_received| processing_zap
+    processing_dm -->|command_processed| sending_response
+    processing_zap -->|response_sent| idle
+    sending_response -->|response_sent| idle
+    processing_dm -.->|error| idle
+    processing_zap -.->|error| idle
+    sending_response -.->|error| idle
+
+    class idle,processing_dm,processing_zap,sending_response state
+
+    linkStyle default stroke:#6b7089,stroke-width:2px
+    linkStyle 5,6,7 stroke:#e27878,stroke-width:2px,stroke-dasharray:5
+```
+
 ## Commands
 
 Customers interact with Eggbot by sending text commands via direct message. Any Nostr client that supports encrypted DMs will work (Amethyst, Coracle, Damus, and others).

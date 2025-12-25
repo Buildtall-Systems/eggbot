@@ -25,10 +25,10 @@ dev:
 	air
 
 test:
-	go test -v -race ./...
+	go test -v -race -failfast ./...
 
 lint:
-	golangci-lint run
+	golangci-lint run --max-issues-per-linter=1 --max-same-issues=1
 
 tidy:
 	go mod tidy

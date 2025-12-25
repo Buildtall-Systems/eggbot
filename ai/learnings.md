@@ -1,5 +1,67 @@
 # eggbot Learnings & Patterns
 
+## Distilled FSM Design Principles
+
+**The Core Insight**: FSMs validate logic; databases own state. Never confuse these roles.
+
+### The Four Laws
+
+1. **Separation of Concerns**: FSM answers "can this transition happen?" Database answers "did it happen?"
+
+2. **Validate-Then-Execute**: Check FSM *before* touching the database. Invalid transitions fail fast, before side effects.
+
+3. **Atomic Preconditions**: `WHERE status = 'paid'` is your second line of defense. FSM validates possibility; WHERE validates currency.
+
+4. **Reset on Error**: Any error returns FSM to idle. Simple, predictable, debuggable.
+
+### The Pattern (Complete)
+
+```go
+func TransitionEntity(id int, event string) error {
+    // 1. FSM validates transition is possible
+    if !fsm.Can(currentState, event) {
+        return ErrInvalidTransition
+    }
+
+    // 2. Atomic WHERE prevents race condition
+    result := db.Exec(`UPDATE entities SET state = ? WHERE id = ? AND state = ?`,
+        nextState, id, currentState)
+
+    // 3. Check rows affected (0 = precondition failed)
+    if result.RowsAffected() == 0 {
+        return ErrConcurrentModification
+    }
+    return nil
+}
+```
+
+### Test Structure (Non-Negotiable)
+
+Every FSM needs these test categories:
+- **HappyPath**: Valid transitions complete successfully
+- **InvalidTransitions**: Every impossible transition returns error
+- **ConcurrentAccess**: Race detector catches synchronization bugs
+- **ErrorRecovery**: System reaches valid state after any failure
+
+### When to Use
+
+**Use FSM as Validator when**:
+- State transitions have business rules
+- Multiple actors can modify state
+- Invalid sequences are possible and dangerous
+- You want to add validation without schema changes
+
+**Skip when**:
+- State is trivial (binary flags)
+- Single-threaded, single-actor system
+- Transitions have no preconditions
+
+### Compression
+
+The entire FSM integration reduces to: **validate → execute → verify**.
+
+---
+
 ## FSM as Validator Pattern (PROVEN)
 
 **Context**: Migrated eggbot's implicit state management to explicit FSMs using looplab/fsm
