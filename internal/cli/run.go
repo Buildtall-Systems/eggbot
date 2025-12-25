@@ -407,6 +407,7 @@ const broadcastPrefix = "message customers:"
 
 // parseBroadcast checks if content is a broadcast command and extracts the message.
 func parseBroadcast(content string) (message string, isBroadcast bool) {
+	content = stripMarkdownComments(content)
 	content = strings.TrimSpace(content)
 	lower := strings.ToLower(content)
 	if !strings.HasPrefix(lower, broadcastPrefix) {
@@ -414,6 +415,21 @@ func parseBroadcast(content string) (message string, isBroadcast bool) {
 	}
 	message = strings.TrimSpace(content[len(broadcastPrefix):])
 	return message, true
+}
+
+// stripMarkdownComments removes markdown reference-style link definitions
+// that some Nostr clients prepend to messages, e.g. "[//]: # (nip18)"
+func stripMarkdownComments(content string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[//]:") {
+			continue
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
 }
 
 // broadcastToCustomers sends a DM to all registered customers.

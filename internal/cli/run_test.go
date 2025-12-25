@@ -170,6 +170,12 @@ func TestParseBroadcast(t *testing.T) {
 			wantMessage: "with leading space",
 			wantMatch:   true,
 		},
+		{
+			name:        "strips markdown comments from Nostr clients",
+			input:       "[//]: # (nip18)\nmessage customers: after markdown comment",
+			wantMessage: "after markdown comment",
+			wantMatch:   true,
+		},
 	}
 
 	for _, tt := range tests {
