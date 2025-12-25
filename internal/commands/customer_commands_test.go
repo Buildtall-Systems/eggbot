@@ -42,12 +42,7 @@ const (
 	// Admin keypair
 	testAdminSecretHex = "044d5d4b5961612682ce0749a9ad7f8527b42d95ab9b8cf7a2d7dd6175d8639d"
 	testAdminPubkeyHex = "f28af81d4e2150fdf2366d373a125b22014397460aed537b370a58d116d5a158"
-	testAdminNpub      = "npub17290s82wy9g0mu3kd5mn5yjmygq5896xptk4x7ehpfvdz9k459vqywh6q7"
-
-	// Unknown user keypair (not registered)
-	testUnknownSecretHex = "d067b66a004de257ff3f467e754d22bb2b64a9a59c669e8224d8c624b7decb4f"
-	testUnknownPubkeyHex = "dcfafaaebf643e0c8517e49e13ad25c60ee4a57a0b5f5fc401adbcb9d151f5f5"
-	testUnknownNpub      = "npub1mna04t4lvslqepghuj0p8tf9cc8wfft6pd04l3qp4k7tn5237h6sj6ru9w"
+	testAdminNpub = "npub17290s82wy9g0mu3kd5mn5yjmygq5896xptk4x7ehpfvdz9k459vqywh6q7"
 )
 
 func TestInventoryCmd_Show(t *testing.T) {

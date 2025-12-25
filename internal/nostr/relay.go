@@ -63,18 +63,18 @@ func (rm *RelayManager) Connect(ctx context.Context, since int64) error {
 	// Router goroutine: dispatch events by kind to separate channels
 	go func() {
 		for re := range events {
-			switch re.Event.Kind {
+			switch re.Kind {
 			case nostr.KindEncryptedDirectMessage, nostr.KindGiftWrap: // DMs: kind:4 (NIP-04) or kind:1059 (NIP-17 gift-wrapped)
 				select {
 				case rm.dmEvents <- re.Event:
 				default:
-					log.Printf("DM event channel full, dropping event %s", re.Event.ID)
+					log.Printf("DM event channel full, dropping event %s", re.ID)
 				}
 			case nostr.KindZap: // Zap receipt
 				select {
 				case rm.zapEvents <- re.Event:
 				default:
-					log.Printf("zap event channel full, dropping event %s", re.Event.ID)
+					log.Printf("zap event channel full, dropping event %s", re.ID)
 				}
 			}
 		}

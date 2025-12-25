@@ -17,9 +17,9 @@ func TestFetchMetadata_Success(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		json.NewEncoder(w).Encode(LNURLPayMetadata{
+		_ = json.NewEncoder(w).Encode(LNURLPayMetadata{
 			Callback:    "https://example.com/lnurlp/callback",
-			MinSendable: 1000,       // 1 sat
+			MinSendable: 1000,         // 1 sat
 			MaxSendable: 100000000000, // 100k sats
 			Tag:         "payRequest",
 		})
@@ -75,9 +75,9 @@ func TestRequestInvoice_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, ".well-known/lnurlp"):
-			json.NewEncoder(w).Encode(LNURLPayMetadata{
+			_ = json.NewEncoder(w).Encode(LNURLPayMetadata{
 				Callback:    "http://" + r.Host + "/callback",
-				MinSendable: 1000,       // 1 sat
+				MinSendable: 1000,         // 1 sat
 				MaxSendable: 100000000000, // 100k sats
 			})
 		case strings.Contains(r.URL.Path, "callback"):
@@ -86,7 +86,7 @@ func TestRequestInvoice_Success(t *testing.T) {
 			if amount != "3200000" { // 3200 sats in millisats
 				t.Errorf("expected amount=3200000, got %s", amount)
 			}
-			json.NewEncoder(w).Encode(InvoiceResponse{
+			_ = json.NewEncoder(w).Encode(InvoiceResponse{
 				PR: expectedInvoice,
 			})
 		default:
@@ -205,7 +205,7 @@ func TestCallbackURLConstruction(t *testing.T) {
 func TestNewClient(t *testing.T) {
 	client := NewClient()
 	if client == nil {
-		t.Error("NewClient returned nil")
+		t.Fatal("NewClient returned nil")
 	}
 	if client.httpClient == nil {
 		t.Error("httpClient should be initialized")

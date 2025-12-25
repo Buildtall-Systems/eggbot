@@ -64,7 +64,7 @@ func (c *Client) FetchMetadata(ctx context.Context, lightningAddress string) (*L
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrLNURLMetadataFetch, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: HTTP %d", ErrLNURLMetadataFetch, resp.StatusCode)
@@ -124,7 +124,7 @@ func (c *Client) RequestInvoice(ctx context.Context, lightningAddress string, am
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrLNURLInvoiceRequest, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("%w: HTTP %d", ErrLNURLInvoiceRequest, resp.StatusCode)

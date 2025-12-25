@@ -102,3 +102,85 @@ func TestLogOutputForSentResponse(t *testing.T) {
 		t.Errorf("sent response log should NOT contain truncated hex, got: %s", output)
 	}
 }
+
+func TestParseBroadcast(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantMessage string
+		wantMatch   bool
+	}{
+		{
+			name:        "valid broadcast",
+			input:       "message customers: Hello everyone!",
+			wantMessage: "Hello everyone!",
+			wantMatch:   true,
+		},
+		{
+			name:        "case insensitive",
+			input:       "MESSAGE CUSTOMERS: Test message",
+			wantMessage: "Test message",
+			wantMatch:   true,
+		},
+		{
+			name:        "mixed case",
+			input:       "Message Customers: Mixed case test",
+			wantMessage: "Mixed case test",
+			wantMatch:   true,
+		},
+		{
+			name:        "empty message after prefix",
+			input:       "message customers:",
+			wantMessage: "",
+			wantMatch:   true,
+		},
+		{
+			name:        "whitespace only after prefix",
+			input:       "message customers:   ",
+			wantMessage: "",
+			wantMatch:   true,
+		},
+		{
+			name:        "preserves message whitespace",
+			input:       "message customers:   spaced out   ",
+			wantMessage: "spaced out",
+			wantMatch:   true,
+		},
+		{
+			name:        "not a broadcast - regular command",
+			input:       "inventory",
+			wantMessage: "",
+			wantMatch:   false,
+		},
+		{
+			name:        "not a broadcast - similar prefix",
+			input:       "message customer: wrong",
+			wantMessage: "",
+			wantMatch:   false,
+		},
+		{
+			name:        "not a broadcast - partial match",
+			input:       "message",
+			wantMessage: "",
+			wantMatch:   false,
+		},
+		{
+			name:        "leading whitespace trimmed",
+			input:       "  message customers: with leading space",
+			wantMessage: "with leading space",
+			wantMatch:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotMessage, gotMatch := parseBroadcast(tt.input)
+			if gotMatch != tt.wantMatch {
+				t.Errorf("parseBroadcast(%q) match = %v, want %v", tt.input, gotMatch, tt.wantMatch)
+			}
+			if gotMessage != tt.wantMessage {
+				t.Errorf("parseBroadcast(%q) message = %q, want %q", tt.input, gotMessage, tt.wantMessage)
+			}
+		})
+	}
+}

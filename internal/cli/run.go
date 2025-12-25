@@ -179,6 +179,34 @@ func runBot(cmd *cobra.Command, args []string) error {
 			senderNpub, _ := nip19.EncodePublicKey(senderPubkey)
 			log.Printf("DM from %s: %s", senderNpub, messageContent)
 
+			// Check for admin broadcast command (special syntax, handled before normal parsing)
+			if broadcastMsg, isBroadcast := parseBroadcast(messageContent); isBroadcast {
+				if !commands.IsAdmin(senderNpub, cfg.Admins) {
+					sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
+						senderPubkey, "Permission denied: broadcast requires admin privileges", incomingProtocol)
+					_ = database.SetHighWaterMark(eventTs)
+					continue
+				}
+				if broadcastMsg == "" {
+					sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
+						senderPubkey, "Usage: message customers: <your message>", incomingProtocol)
+					_ = database.SetHighWaterMark(eventTs)
+					continue
+				}
+
+				log.Printf("admin %s broadcasting: %s", senderNpub, broadcastMsg)
+				sent, failed := broadcastToCustomers(ctx, kr, relayMgr, cfg, database, broadcastMsg)
+
+				summary := fmt.Sprintf("Broadcast sent to %d customers", sent)
+				if failed > 0 {
+					summary += fmt.Sprintf(" (%d failed)", failed)
+				}
+				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
+					senderPubkey, summary, incomingProtocol)
+				_ = database.SetHighWaterMark(eventTs)
+				continue
+			}
+
 			// Parse command from message
 			parsedCmd := commands.Parse(messageContent)
 			if parsedCmd == nil {
@@ -372,6 +400,44 @@ func sendResponse(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayMa
 	// Convert hex to npub for display
 	recipientNpub, _ := nip19.EncodePublicKey(recipientPubkeyHex)
 	log.Printf("sent response to %s", recipientNpub)
+}
+
+// broadcastPrefix is the command prefix for admin broadcast messages.
+const broadcastPrefix = "message customers:"
+
+// parseBroadcast checks if content is a broadcast command and extracts the message.
+func parseBroadcast(content string) (message string, isBroadcast bool) {
+	content = strings.TrimSpace(content)
+	lower := strings.ToLower(content)
+	if !strings.HasPrefix(lower, broadcastPrefix) {
+		return "", false
+	}
+	message = strings.TrimSpace(content[len(broadcastPrefix):])
+	return message, true
+}
+
+// broadcastToCustomers sends a DM to all registered customers.
+func broadcastToCustomers(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayManager,
+	cfg *config.Config, database *db.DB, message string) (sent int, failed int) {
+
+	customers, err := database.ListCustomers(ctx)
+	if err != nil {
+		log.Printf("failed to list customers for broadcast: %v", err)
+		return 0, 0
+	}
+
+	for _, customer := range customers {
+		_, pubkeyHex, err := nip19.Decode(customer.Npub)
+		if err != nil {
+			log.Printf("failed to decode customer npub %s: %v", customer.Npub, err)
+			failed++
+			continue
+		}
+		sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
+			pubkeyHex.(string), message, dm.ProtocolNIP04)
+		sent++
+	}
+	return sent, failed
 }
 
 // notifyAdmins sends a DM to all configured admins.
