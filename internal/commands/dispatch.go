@@ -41,6 +41,9 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub stri
 	case CmdHelp:
 		return HelpCmd(isAdmin)
 
+	case CmdNotify:
+		return NotifyCmd(ctx, database, senderNpub, cmd.Args)
+
 	// Admin commands
 	case CmdDeliver:
 		return DeliverCmd(ctx, database, cmd.Args)

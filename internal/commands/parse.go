@@ -19,6 +19,7 @@ const (
 	CmdBalance   = "balance"
 	CmdHistory   = "history"
 	CmdHelp      = "help"
+	CmdNotify    = "notify"
 
 	// Admin commands
 	CmdDeliver        = "deliver"
@@ -72,7 +73,7 @@ func stripMarkdownComments(content string) string {
 // IsCustomerCommand returns true if the command is available to customers.
 func (c *Command) IsCustomerCommand() bool {
 	switch c.Name {
-	case CmdInventory, CmdOrder, CmdCancel, CmdBalance, CmdHistory, CmdHelp:
+	case CmdInventory, CmdOrder, CmdCancel, CmdBalance, CmdHistory, CmdHelp, CmdNotify:
 		return true
 	default:
 		return false

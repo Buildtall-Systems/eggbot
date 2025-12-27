@@ -259,3 +259,48 @@ Completed 7-phase migration to explicit finite state machines (looplab/fsm) for 
 3. Atomic WHERE prevents race conditions without explicit locks
 4. Error recovery via FSM reset ensures bot always reaches valid state
 5. Pattern ready for extraction and reuse in other buildtall.systems projects
+
+## 2025-12-27
+
+### Inventory Notification Feature
+
+Implemented `notify <qty>` command allowing customers to request DM notifications when inventory reaches their specified threshold.
+
+**Specification**:
+- `notify <6|12>` - Subscribe to notification (quantized to order sizes)
+- `notify off` - Cancel subscription
+- `notify` (no args) - Show current subscription status
+- One-shot notification: subscription deleted after DM sent
+- Upsert semantics: re-running command updates threshold
+
+**Implementation (5 phases)**:
+
+1. **Migration**: `005_inventory_notifications.sql`
+   - `inventory_notifications` table with CHECK constraint (6 or 12 only)
+   - Foreign key to customers with ON DELETE CASCADE
+   - Unique constraint per customer
+
+2. **Database operations**: Added to `internal/db/operations.go`
+   - `UpsertInventoryNotification()` - INSERT OR REPLACE semantics
+   - `DeleteInventoryNotification()` - Remove by customer ID
+   - `GetInventoryNotification()` - Query current subscription
+   - `GetTriggeredNotifications()` - Query subscriptions meeting threshold
+   - `DeleteInventoryNotificationByID()` - Remove after sending
+
+3. **Command implementation**:
+   - Added `CmdNotify` constant to `internal/commands/parse.go`
+   - Added `NotifyCmd()` to `internal/commands/customer_commands.go`
+   - Added dispatch case in `internal/commands/dispatch.go`
+
+4. **Notification trigger**: Added `checkInventoryNotifications()` in `internal/cli/run.go`
+   - Called after `inventory` and `cancel` commands
+   - Queries triggered notifications, sends DMs, deletes subscriptions
+
+5. **Help text**: Updated to include notify commands
+
+**Verification**:
+- All tests passing with race detector
+- Lint clean
+- Build successful
+
+**Plan artifact**: `thoughts/plans/2025-12-26_18-41-28_eggbot-notify-command.md`

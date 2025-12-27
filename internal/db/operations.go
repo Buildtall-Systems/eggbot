@@ -70,6 +70,21 @@ type Transaction struct {
 	CreatedAt  time.Time
 }
 
+// InventoryNotification represents a customer's notification subscription.
+type InventoryNotification struct {
+	ID            int64
+	CustomerID    int64
+	ThresholdEggs int
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// InventoryNotificationWithCustomer includes customer npub for sending DMs.
+type InventoryNotificationWithCustomer struct {
+	InventoryNotification
+	CustomerNpub string
+}
+
 // GetInventory returns the current egg count.
 func (db *DB) GetInventory(ctx context.Context) (int, error) {
 	var count int
@@ -620,6 +635,88 @@ func (db *DB) GetTotalSales(ctx context.Context) (int64, error) {
 		return 0, nil
 	}
 	return total.Int64, nil
+}
+
+// UpsertInventoryNotification creates or updates a notification subscription.
+// Uses INSERT OR REPLACE for upsert semantics (one subscription per customer).
+func (db *DB) UpsertInventoryNotification(ctx context.Context, customerID int64, threshold int) error {
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO inventory_notifications (customer_id, threshold_eggs)
+		VALUES (?, ?)
+		ON CONFLICT(customer_id) DO UPDATE SET
+			threshold_eggs = excluded.threshold_eggs,
+			updated_at = CURRENT_TIMESTAMP
+	`, customerID, threshold)
+	if err != nil {
+		return fmt.Errorf("upserting inventory notification: %w", err)
+	}
+	return nil
+}
+
+// DeleteInventoryNotification removes a subscription by customer ID.
+func (db *DB) DeleteInventoryNotification(ctx context.Context, customerID int64) error {
+	_, err := db.ExecContext(ctx, `
+		DELETE FROM inventory_notifications WHERE customer_id = ?
+	`, customerID)
+	if err != nil {
+		return fmt.Errorf("deleting inventory notification: %w", err)
+	}
+	return nil
+}
+
+// GetInventoryNotification returns the subscription for a customer, or nil if none.
+func (db *DB) GetInventoryNotification(ctx context.Context, customerID int64) (*InventoryNotification, error) {
+	var n InventoryNotification
+	err := db.QueryRowContext(ctx, `
+		SELECT id, customer_id, threshold_eggs, created_at, updated_at
+		FROM inventory_notifications WHERE customer_id = ?
+	`, customerID).Scan(&n.ID, &n.CustomerID, &n.ThresholdEggs, &n.CreatedAt, &n.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying inventory notification: %w", err)
+	}
+	return &n, nil
+}
+
+// GetTriggeredNotifications returns subscriptions where threshold <= available.
+// Joins with customers table to get npub for DM sending.
+func (db *DB) GetTriggeredNotifications(ctx context.Context, available int) ([]InventoryNotificationWithCustomer, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT n.id, n.customer_id, n.threshold_eggs, n.created_at, n.updated_at, c.npub
+		FROM inventory_notifications n
+		JOIN customers c ON n.customer_id = c.id
+		WHERE n.threshold_eggs <= ?
+	`, available)
+	if err != nil {
+		return nil, fmt.Errorf("querying triggered notifications: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var notifications []InventoryNotificationWithCustomer
+	for rows.Next() {
+		var n InventoryNotificationWithCustomer
+		if err := rows.Scan(&n.ID, &n.CustomerID, &n.ThresholdEggs, &n.CreatedAt, &n.UpdatedAt, &n.CustomerNpub); err != nil {
+			return nil, fmt.Errorf("scanning notification: %w", err)
+		}
+		notifications = append(notifications, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating notifications: %w", err)
+	}
+	return notifications, nil
+}
+
+// DeleteInventoryNotificationByID removes a subscription by ID (after sending notification).
+func (db *DB) DeleteInventoryNotificationByID(ctx context.Context, id int64) error {
+	_, err := db.ExecContext(ctx, `
+		DELETE FROM inventory_notifications WHERE id = ?
+	`, id)
+	if err != nil {
+		return fmt.Errorf("deleting inventory notification by id: %w", err)
+	}
+	return nil
 }
 
 // isUniqueViolation checks if the error is a unique constraint violation.

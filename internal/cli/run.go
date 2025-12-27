@@ -284,6 +284,11 @@ func runBot(cmd *cobra.Command, args []string) error {
 				notifyAdmins(ctx, kr, relayMgr, cfg, adminMsg)
 			}
 
+			// Check for inventory notifications after commands that may increase inventory
+			if parsedCmd.Name == commands.CmdInventory || parsedCmd.Name == commands.CmdCancel {
+				checkInventoryNotifications(ctx, kr, relayMgr, cfg, database)
+			}
+
 			// Reset FSM to idle after DM processing completes
 			processorFSM.Reset()
 			_ = database.SetHighWaterMark(eventTs)
@@ -466,5 +471,45 @@ func notifyAdmins(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayMa
 		}
 		sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
 			adminPubkeyHex.(string), message, dm.ProtocolNIP04)
+	}
+}
+
+// checkInventoryNotifications checks for triggered notifications and sends DMs.
+// Called after commands that may increase inventory (inventory add/set, cancel).
+func checkInventoryNotifications(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayManager,
+	cfg *config.Config, database *db.DB) {
+
+	available, err := database.GetInventory(ctx)
+	if err != nil {
+		log.Printf("failed to get inventory for notifications: %v", err)
+		return
+	}
+
+	if available == 0 {
+		return
+	}
+
+	notifications, err := database.GetTriggeredNotifications(ctx, available)
+	if err != nil {
+		log.Printf("failed to get triggered notifications: %v", err)
+		return
+	}
+
+	for _, n := range notifications {
+		_, pubkeyHex, err := nip19.Decode(n.CustomerNpub)
+		if err != nil {
+			log.Printf("failed to decode customer npub %s: %v", n.CustomerNpub, err)
+			continue
+		}
+
+		msg := fmt.Sprintf("🥚 Inventory alert: %d eggs are now available!", available)
+		sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
+			pubkeyHex.(string), msg, dm.ProtocolNIP04)
+
+		if err := database.DeleteInventoryNotificationByID(ctx, n.ID); err != nil {
+			log.Printf("failed to delete notification %d: %v", n.ID, err)
+		} else {
+			log.Printf("sent inventory notification to %s (threshold: %d)", n.CustomerNpub, n.ThresholdEggs)
+		}
 	}
 }

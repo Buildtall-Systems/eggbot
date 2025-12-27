@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 
 	"github.com/buildtall-systems/eggbot/internal/db"
 	"github.com/buildtall-systems/eggbot/internal/lightning"
@@ -306,6 +307,8 @@ func HelpCmd(isAdmin bool) Result {
 • cancel <order_id> - Cancel a pending order
 • balance - Check your payment balance
 • history - View recent orders
+• notify <6|12> - Get notified when inventory reaches quantity
+• notify off - Cancel notification
 • help - Show this message`
 
 	if isAdmin {
@@ -326,4 +329,44 @@ Admin commands:
 	}
 
 	return Result{Message: msg}
+}
+
+// NotifyCmd manages inventory notification subscriptions.
+// Args: <6|12> to subscribe, "off" to unsubscribe
+func NotifyCmd(ctx context.Context, database *db.DB, senderNpub string, args []string) Result {
+	customer, err := database.GetCustomerByNpub(ctx, senderNpub)
+	if err != nil {
+		return Result{Error: fmt.Errorf("looking up customer: %w", err)}
+	}
+
+	if len(args) == 0 {
+		existing, err := database.GetInventoryNotification(ctx, customer.ID)
+		if err != nil {
+			return Result{Error: fmt.Errorf("checking notification: %w", err)}
+		}
+		if existing != nil {
+			return Result{Message: fmt.Sprintf("You will be notified when %d eggs are available.\nUse 'notify off' to cancel.", existing.ThresholdEggs)}
+		}
+		return Result{Error: errors.New("usage: notify <6|12> or notify off")}
+	}
+
+	arg := strings.ToLower(args[0])
+
+	if arg == "off" {
+		if err := database.DeleteInventoryNotification(ctx, customer.ID); err != nil {
+			return Result{Error: fmt.Errorf("removing notification: %w", err)}
+		}
+		return Result{Message: "Notification cancelled."}
+	}
+
+	qty, err := strconv.Atoi(arg)
+	if err != nil || (qty != 6 && qty != 12) {
+		return Result{Error: errors.New("quantity must be 6 or 12")}
+	}
+
+	if err := database.UpsertInventoryNotification(ctx, customer.ID, qty); err != nil {
+		return Result{Error: fmt.Errorf("setting notification: %w", err)}
+	}
+
+	return Result{Message: fmt.Sprintf("You will be notified when %d eggs are available.", qty)}
 }
