@@ -304,3 +304,5 @@ Implemented `notify <qty>` command allowing customers to request DM notification
 - Build successful
 
 **Plan artifact**: `thoughts/plans/2025-12-26_18-41-28_eggbot-notify-command.md`
+
+**Committed**: `5ef3375` feat: add notify command for inventory threshold alerts
