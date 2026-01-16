@@ -127,10 +127,12 @@ func runBot(cmd *cobra.Command, args []string) error {
 			isNew, err := database.TryProcess(event.ID, event.Kind, eventTs)
 			if err != nil {
 				log.Printf("dedup check failed: %v", err)
+				processorFSM.Reset()
 				continue
 			}
 			if !isNew {
 				log.Printf("duplicate event %s, skipping", event.ID)
+				processorFSM.Reset()
 				continue
 			}
 
@@ -310,10 +312,12 @@ func runBot(cmd *cobra.Command, args []string) error {
 			isNew, err := database.TryProcess(event.ID, event.Kind, eventTs)
 			if err != nil {
 				log.Printf("dedup check failed: %v", err)
+				processorFSM.Reset()
 				continue
 			}
 			if !isNew {
 				log.Printf("duplicate event %s, skipping", event.ID)
+				processorFSM.Reset()
 				continue
 			}
 

@@ -306,3 +306,27 @@ Implemented `notify <qty>` command allowing customers to request DM notification
 **Plan artifact**: `thoughts/plans/2025-12-26_18-41-28_eggbot-notify-command.md`
 
 **Committed**: `5ef3375` feat: add notify command for inventory threshold alerts
+
+## 2026-01-16
+
+### FSM State Leakage Bug Fix
+
+**Problem**: First message after restart (or after relay event replay) was being dropped.
+
+**Root Cause**: After `processorFSM.Event(ctx, fsm.ProcessorEventDMReceived)` transitions FSM to `processing_dm`, several early-exit code paths called `continue` without resetting the FSM. The duplicate-check path (lines 127-135) was the primary culprit—when relays replayed already-processed events, the FSM got stuck in `processing_dm` state.
+
+**Failure Sequence**:
+1. Relay replays processed event → FSM transitions to `processing_dm`
+2. Duplicate detected → `continue` without FSM reset
+3. FSM stuck in `processing_dm`
+4. Next real message arrives → FSM rejects `dm_received` event
+5. FSM reset at error handler → but message already dropped
+6. Subsequent messages work
+
+**Evidence**: Log analysis showed FSM stuck for days between duplicate skip (Jan 11) and next message attempt (Jan 13).
+
+**Fix**: Added `processorFSM.Reset()` before `continue` in duplicate-check blocks for both DM and zap handlers in `internal/cli/run.go`.
+
+**Test**: Added `TestEventProcessorFSM_ResetRequiredAfterEarlyExit` to document the bug pattern and verify the fix.
+
+**Verification**: All tests pass with race detector, lint clean, build successful.

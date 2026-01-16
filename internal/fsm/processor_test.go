@@ -248,3 +248,37 @@ func TestEventProcessorFSM_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestEventProcessorFSM_ResetRequiredAfterEarlyExit(t *testing.T) {
+	// This test documents the bug fixed in run.go: if FSM transitions to
+	// processing_dm but the handler exits early (e.g., duplicate detection),
+	// Reset() must be called or the next dm_received will fail.
+	ep := NewEventProcessorFSM()
+	ctx := context.Background()
+
+	// Simulate: first DM arrives, FSM transitions to processing_dm
+	if err := ep.Event(ctx, ProcessorEventDMReceived); err != nil {
+		t.Fatalf("first dm_received should succeed: %v", err)
+	}
+	if ep.Current() != ProcessorStateProcessingDM {
+		t.Fatalf("should be in processing_dm, got %s", ep.Current())
+	}
+
+	// Simulate: early exit without Reset (the bug)
+	// Next DM arrives - this WILL fail because FSM is stuck in processing_dm
+	err := ep.Event(ctx, ProcessorEventDMReceived)
+	if err == nil {
+		t.Fatal("second dm_received should fail when FSM stuck in processing_dm")
+	}
+
+	// The fix: Reset() before continuing
+	ep.Reset()
+	if ep.Current() != ProcessorStateIdle {
+		t.Fatalf("should be idle after reset, got %s", ep.Current())
+	}
+
+	// Now the next DM works
+	if err := ep.Event(ctx, ProcessorEventDMReceived); err != nil {
+		t.Fatalf("dm_received after reset should succeed: %v", err)
+	}
+}
