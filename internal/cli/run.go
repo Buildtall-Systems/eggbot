@@ -16,6 +16,7 @@ import (
 	"github.com/buildtall-systems/eggbot/internal/db"
 	"github.com/buildtall-systems/eggbot/internal/dm"
 	"github.com/buildtall-systems/eggbot/internal/fsm"
+	"github.com/buildtall-systems/eggbot/internal/invoices"
 	"github.com/buildtall-systems/eggbot/internal/lightning"
 	"github.com/buildtall-systems/eggbot/internal/nostr"
 	"github.com/buildtall-systems/eggbot/internal/zaps"
@@ -117,6 +118,24 @@ func runBot(cmd *cobra.Command, args []string) error {
 
 	// Main event loop
 	for {
+		// Opportunistic NWC invoice check before processing events
+		checkResult := invoices.CheckPendingInvoices(ctx, database, lnBackend)
+		for _, settled := range checkResult.Settled {
+			_, custPubkeyHex, decErr := nip19.Decode(settled.Customer.Npub)
+			if decErr != nil {
+				log.Printf("failed to decode customer npub %s: %v", settled.Customer.Npub, decErr)
+				continue
+			}
+			custMsg := fmt.Sprintf("Payment confirmed for order #%d (%d sats). Thank you!",
+				settled.Order.ID, settled.Order.TotalSats)
+			sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
+				custPubkeyHex.(string), custMsg, dm.ProtocolNIP04)
+
+			adminMsg := fmt.Sprintf("NWC payment confirmed: order #%d (%d sats) from %s",
+				settled.Order.ID, settled.Order.TotalSats, settled.Customer.Npub)
+			notifyAdmins(ctx, kr, relayMgr, cfg, adminMsg)
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Printf("shutting down...")
