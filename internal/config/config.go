@@ -32,11 +32,10 @@ type NostrConfig struct {
 	BotPubkeyHex  string // Bot's public key in hex (derived from secret)
 }
 
-// LightningConfig holds Lightning payment settings.
 type LightningConfig struct {
-	LnurlNpub        string // LNURL provider's npub (from config)
-	LnurlPubkeyHex   string // Derived hex pubkey for zap validation
-	LightningAddress string // Lightning address for payments (e.g., user@getalby.com)
+	LnurlNpub           string
+	LnurlPubkeyHex      string
+	NWCConnectionString  string
 }
 
 // PricingConfig holds egg pricing settings.
@@ -57,8 +56,7 @@ func Load() (*Config, error) {
 			BotNpub: viper.GetString("nostr.bot_npub"),
 		},
 		Lightning: LightningConfig{
-			LnurlNpub:        viper.GetString("lightning.lnurl_npub"),
-			LightningAddress: viper.GetString("lightning.address"),
+			LnurlNpub: viper.GetString("lightning.lnurl_npub"),
 		},
 		Pricing: PricingConfig{
 			SatsPerHalfDozen: viper.GetInt("pricing.sats_per_half_dozen"),
@@ -141,6 +139,8 @@ func LoadWithSecrets() (*Config, error) {
 	} else {
 		cfg.Nostr.BotNpub = derivedNpub
 	}
+
+	cfg.Lightning.NWCConnectionString = os.Getenv("EGGBOT_NWC")
 
 	// Derive LNURL provider pubkey hex if specified
 	if cfg.Lightning.LnurlNpub != "" {
