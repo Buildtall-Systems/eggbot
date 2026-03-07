@@ -7,13 +7,11 @@ import (
 	"github.com/buildtall-systems/eggbot/internal/lightning"
 )
 
-// ExecuteConfig holds configuration needed for command execution.
 type ExecuteConfig struct {
 	SatsPerHalfDozen int
 	Admins           []string
-	LightningAddress string
-	BotNpub          string             // Bot's npub for payment links
-	LightningClient  *lightning.Client  // LNURL-pay client for invoice generation
+	BotNpub          string
+	LightningBackend lightning.Backend
 }
 
 // Execute runs the command and returns a result.
@@ -27,7 +25,7 @@ func Execute(ctx context.Context, database *db.DB, cmd *Command, senderNpub stri
 		return InventoryCmd(ctx, database, cmd.Args, isAdmin)
 
 	case CmdOrder:
-		return OrderCmd(ctx, database, senderNpub, cmd.Args, cfg.SatsPerHalfDozen, cfg.LightningAddress, cfg.BotNpub, cfg.LightningClient)
+		return OrderCmd(ctx, database, senderNpub, cmd.Args, cfg.SatsPerHalfDozen, cfg.BotNpub, cfg.LightningBackend)
 
 	case CmdCancel:
 		return CancelOrderCmd(ctx, database, senderNpub, cmd.Args)

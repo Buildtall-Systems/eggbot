@@ -407,7 +407,7 @@ func TestOrderCmd(t *testing.T) {
 				_ = database.CancelOrder(ctx, o.ID)
 			}
 
-			result := OrderCmd(ctx, database, testCustomerNpub, tt.args, 3200, "", "", nil)
+			result := OrderCmd(ctx, database, testCustomerNpub, tt.args, 3200, "", nil)
 			if tt.wantErr {
 				if result.Error == nil {
 					t.Fatal("expected error, got nil")
@@ -434,7 +434,7 @@ func TestOrderCmd_ValidDozen(t *testing.T) {
 	_ = database.AddEggs(ctx, 20)
 	_, _ = database.CreateCustomer(ctx, testCustomerNpub)
 
-	result := OrderCmd(ctx, database, testCustomerNpub, []string{"12"}, 3200, "", "", nil)
+	result := OrderCmd(ctx, database, testCustomerNpub, []string{"12"}, 3200, "", nil)
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
@@ -454,13 +454,13 @@ func TestOrderCmd_PendingOrderBlocks(t *testing.T) {
 	c, _ := database.CreateCustomer(ctx, testCustomerNpub)
 
 	// First order succeeds
-	result := OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", "", nil)
+	result := OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", nil)
 	if result.Error != nil {
 		t.Fatalf("first order failed: %v", result.Error)
 	}
 
 	// Second order blocked due to pending
-	result = OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", "", nil)
+	result = OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", nil)
 	if result.Error == nil {
 		t.Fatal("expected error for second order with pending")
 	}
@@ -473,7 +473,7 @@ func TestOrderCmd_PendingOrderBlocks(t *testing.T) {
 	_ = database.CancelOrder(ctx, pending[0].ID)
 
 	// Now ordering works again
-	result = OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", "", nil)
+	result = OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", nil)
 	if result.Error != nil {
 		t.Fatalf("order after cancel failed: %v", result.Error)
 	}
@@ -487,7 +487,7 @@ func TestOrderCmd_InsufficientInventory(t *testing.T) {
 	_ = database.AddEggs(ctx, 5)
 	_, _ = database.CreateCustomer(ctx, testCustomerNpub)
 
-	result := OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", "", nil)
+	result := OrderCmd(ctx, database, testCustomerNpub, []string{"6"}, 3200, "", nil)
 	if result.Error == nil {
 		t.Fatal("expected error for insufficient inventory")
 	}
