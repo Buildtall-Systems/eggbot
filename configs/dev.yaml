@@ -14,8 +14,7 @@ nostr:
 lightning:
   # LNURL provider npub (the Lightning service that signs zap receipts)
   lnurl_npub: "npub108cq6066r8kgqcvflj4s8sd7flup6x8wfajnez86cs07qdts7seqacnvsn"
-  # Lightning address for customers to send payments
-  address: "eggbot@getalby.com"
+  # NWC connection string set via EGGBOT_NWC environment variable
 
 pricing:
   sats_per_half_dozen: 3200

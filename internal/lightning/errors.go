@@ -2,14 +2,8 @@ package lightning
 
 import "errors"
 
-// ErrLNURLMetadataFetch indicates failure to fetch LNURL-pay metadata.
-var ErrLNURLMetadataFetch = errors.New("failed to fetch LNURL metadata")
+var ErrNWCConnectionFailed = errors.New("NWC connection failed")
 
-// ErrLNURLInvoiceRequest indicates failure to request invoice from callback.
-var ErrLNURLInvoiceRequest = errors.New("failed to request LNURL invoice")
+var ErrNWCRequestFailed = errors.New("NWC request failed")
 
-// ErrInvoiceAmountOutOfRange indicates requested amount is outside min/max bounds.
-var ErrInvoiceAmountOutOfRange = errors.New("amount outside LNURL pay range")
-
-// ErrInvalidLightningAddress indicates the lightning address format is invalid.
-var ErrInvalidLightningAddress = errors.New("invalid lightning address format")
+var ErrInvalidConnectionString = errors.New("invalid NWC connection string")

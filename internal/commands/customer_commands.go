@@ -133,9 +133,7 @@ func inventorySet(ctx context.Context, database *db.DB, args []string) Result {
 	return Result{Message: fmt.Sprintf("Inventory set to %d eggs.", quantity)}
 }
 
-// OrderCmd creates a new order for eggs and reserves inventory atomically.
-// Args: [quantity] - must be 6 or 12 (half-dozen or dozen)
-func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []string, satsPerHalfDozen int, lightningAddress, botNpub string, lnClient *lightning.Client) Result {
+func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []string, satsPerHalfDozen int, botNpub string, lnBackend lightning.Backend) Result {
 	if len(args) < 1 {
 		return Result{Error: errors.New("usage: order <quantity> (6 or 12)")}
 	}
@@ -182,19 +180,21 @@ func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []st
 
 	msg := fmt.Sprintf("Order %d: %d eggs reserved for %d sats.", order.ID, quantity, totalSats)
 
-	// Generate bolt11 invoice for clickable payment in Amethyst
 	var hasInvoice bool
-	if lnClient != nil && lightningAddress != "" {
-		invoice, err := lnClient.RequestInvoice(ctx, lightningAddress, totalSats)
-		if err != nil {
-			log.Printf("invoice generation failed: %v", err)
+	if lnBackend != nil {
+		memo := fmt.Sprintf("eggbot order %d: %d eggs", order.ID, quantity)
+		invoice, invoiceErr := lnBackend.CreateInvoice(ctx, totalSats, memo)
+		if invoiceErr != nil {
+			log.Printf("invoice generation failed: %v", invoiceErr)
 		} else {
-			msg += fmt.Sprintf("\n\nPay invoice:\n%s", invoice)
+			if setErr := database.SetOrderPaymentHash(ctx, order.ID, invoice.PaymentHash); setErr != nil {
+				log.Printf("failed to store payment hash: %v", setErr)
+			}
+			msg += fmt.Sprintf("\n\nPay invoice:\n%s", invoice.PaymentRequest)
 			hasInvoice = true
 		}
 	}
 
-	// Include zap instructions
 	if botNpub != "" {
 		if hasInvoice {
 			msg += fmt.Sprintf("\n\nOr zap this profile:\nnostr:%s", botNpub)

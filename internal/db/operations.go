@@ -39,15 +39,15 @@ type Customer struct {
 	UpdatedAt time.Time
 }
 
-// Order represents an egg order.
 type Order struct {
-	ID         int64
-	CustomerID int64
-	Quantity   int
-	TotalSats  int64
-	Status     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID          int64
+	CustomerID  int64
+	Quantity    int
+	TotalSats   int64
+	Status      string
+	PaymentHash sql.NullString
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // OrderWithCustomer represents an order with customer info (for admin listing).
@@ -320,9 +320,9 @@ func (db *DB) CreateOrder(ctx context.Context, customerID int64, quantity int, t
 func (db *DB) GetOrderByID(ctx context.Context, orderID int64) (*Order, error) {
 	var o Order
 	err := db.QueryRowContext(ctx, `
-		SELECT id, customer_id, quantity, total_sats, status, created_at, updated_at
+		SELECT id, customer_id, quantity, total_sats, status, payment_hash, created_at, updated_at
 		FROM orders WHERE id = ?
-	`, orderID).Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.CreatedAt, &o.UpdatedAt)
+	`, orderID).Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.PaymentHash, &o.CreatedAt, &o.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrOrderNotFound
 	}
@@ -335,7 +335,7 @@ func (db *DB) GetOrderByID(ctx context.Context, orderID int64) (*Order, error) {
 // GetCustomerOrders returns orders for a customer, most recent first.
 func (db *DB) GetCustomerOrders(ctx context.Context, customerID int64, limit int) ([]Order, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, customer_id, quantity, total_sats, status, created_at, updated_at
+		SELECT id, customer_id, quantity, total_sats, status, payment_hash, created_at, updated_at
 		FROM orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT ?
 	`, customerID, limit)
 	if err != nil {
@@ -346,7 +346,7 @@ func (db *DB) GetCustomerOrders(ctx context.Context, customerID int64, limit int
 	var orders []Order
 	for rows.Next() {
 		var o Order
-		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.PaymentHash, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning order: %w", err)
 		}
 		orders = append(orders, o)
@@ -360,7 +360,7 @@ func (db *DB) GetCustomerOrders(ctx context.Context, customerID int64, limit int
 // GetPendingOrdersByCustomer returns pending orders for a customer.
 func (db *DB) GetPendingOrdersByCustomer(ctx context.Context, customerID int64) ([]Order, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, customer_id, quantity, total_sats, status, created_at, updated_at
+		SELECT id, customer_id, quantity, total_sats, status, payment_hash, created_at, updated_at
 		FROM orders WHERE customer_id = ? AND status = 'pending' ORDER BY created_at DESC
 	`, customerID)
 	if err != nil {
@@ -371,7 +371,7 @@ func (db *DB) GetPendingOrdersByCustomer(ctx context.Context, customerID int64) 
 	var orders []Order
 	for rows.Next() {
 		var o Order
-		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.PaymentHash, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning order: %w", err)
 		}
 		orders = append(orders, o)
@@ -414,7 +414,7 @@ func (db *DB) GetAllOrders(ctx context.Context, limit int) ([]OrderWithCustomer,
 // GetPaidOrdersByCustomer returns paid orders for a customer (ready for delivery).
 func (db *DB) GetPaidOrdersByCustomer(ctx context.Context, customerID int64) ([]Order, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, customer_id, quantity, total_sats, status, created_at, updated_at
+		SELECT id, customer_id, quantity, total_sats, status, payment_hash, created_at, updated_at
 		FROM orders WHERE customer_id = ? AND status = 'paid' ORDER BY created_at ASC
 	`, customerID)
 	if err != nil {
@@ -425,7 +425,43 @@ func (db *DB) GetPaidOrdersByCustomer(ctx context.Context, customerID int64) ([]
 	var orders []Order
 	for rows.Next() {
 		var o Order
-		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.PaymentHash, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning order: %w", err)
+		}
+		orders = append(orders, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating orders: %w", err)
+	}
+	return orders, nil
+}
+
+func (db *DB) SetOrderPaymentHash(ctx context.Context, orderID int64, paymentHash string) error {
+	_, err := db.ExecContext(ctx, `
+		UPDATE orders SET payment_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+	`, paymentHash, orderID)
+	if err != nil {
+		return fmt.Errorf("setting payment hash: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) GetPendingOrdersWithPaymentHash(ctx context.Context) ([]Order, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, customer_id, quantity, total_sats, status, payment_hash, created_at, updated_at
+		FROM orders
+		WHERE status = 'pending' AND payment_hash IS NOT NULL
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying pending orders with payment hash: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var orders []Order
+	for rows.Next() {
+		var o Order
+		if err := rows.Scan(&o.ID, &o.CustomerID, &o.Quantity, &o.TotalSats, &o.Status, &o.PaymentHash, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning order: %w", err)
 		}
 		orders = append(orders, o)

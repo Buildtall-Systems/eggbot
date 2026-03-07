@@ -68,6 +68,18 @@ func runBot(cmd *cobra.Command, args []string) error {
 	}
 	log.Printf("database ready")
 
+	var lnBackend lightning.Backend
+	if cfg.Lightning.NWCConnectionString != "" {
+		nwc, nwcErr := lightning.NewNWCBackend(cfg.Lightning.NWCConnectionString)
+		if nwcErr != nil {
+			return fmt.Errorf("creating NWC backend: %w", nwcErr)
+		}
+		lnBackend = nwc
+		log.Printf("NWC backend ready")
+	} else {
+		log.Printf("WARNING: no NWC connection string configured, invoice creation disabled")
+	}
+
 	// Create context that cancels on shutdown signals
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -245,13 +257,11 @@ func runBot(cmd *cobra.Command, args []string) error {
 			}
 
 			// Execute the command
-			lnClient := lightning.NewClient()
 			execCfg := commands.ExecuteConfig{
 				SatsPerHalfDozen: cfg.Pricing.SatsPerHalfDozen,
 				Admins:           cfg.Admins,
-				LightningAddress: cfg.Lightning.LightningAddress,
 				BotNpub:          cfg.Nostr.BotNpub,
-				LightningClient:  lnClient,
+				LightningBackend: lnBackend,
 			}
 			result := commands.Execute(ctx, database, parsedCmd, senderNpub, execCfg)
 
