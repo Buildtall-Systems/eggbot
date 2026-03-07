@@ -1,6 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
 ALTER TABLE orders ADD COLUMN payment_hash TEXT;
+ALTER TABLE orders ADD COLUMN invoice_expires_at TIMESTAMP;
 CREATE INDEX idx_orders_payment_hash ON orders(payment_hash);
 -- +goose StatementEnd
 

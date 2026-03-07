@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/buildtall-systems/eggbot/internal/db"
 	"github.com/buildtall-systems/eggbot/internal/lightning"
@@ -41,7 +42,8 @@ func createPendingOrderWithHash(t *testing.T, database *db.DB, npub string, paym
 		t.Fatalf("failed to create order: %v", err)
 	}
 
-	if err := database.SetOrderPaymentHash(ctx, order.ID, paymentHash); err != nil {
+	expiresAt := time.Now().UTC().Add(1 * time.Hour)
+	if err := database.SetOrderPaymentHash(ctx, order.ID, paymentHash, &expiresAt); err != nil {
 		t.Fatalf("failed to set payment hash: %v", err)
 	}
 

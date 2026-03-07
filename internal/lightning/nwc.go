@@ -183,11 +183,7 @@ func (n *NWCBackend) sendRequest(ctx context.Context, req nwcRequest, timeout ti
 	if err != nil {
 		return nil, fmt.Errorf("connecting to relay: %w", err)
 	}
-	defer func() {
-		if closeErr := relay.Close(); closeErr != nil {
-			return
-		}
-	}()
+	defer func() { _ = relay.Close() }()
 
 	sub, err := relay.Subscribe(timeoutCtx, nostr.Filters{{
 		Kinds:   []int{KindNWCResponse},

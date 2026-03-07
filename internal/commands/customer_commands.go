@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/buildtall-systems/eggbot/internal/db"
 	"github.com/buildtall-systems/eggbot/internal/lightning"
@@ -187,7 +188,8 @@ func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []st
 		if invoiceErr != nil {
 			log.Printf("invoice generation failed: %v", invoiceErr)
 		} else {
-			if setErr := database.SetOrderPaymentHash(ctx, order.ID, invoice.PaymentHash); setErr != nil {
+			expiresAt := time.Now().UTC().Add(1 * time.Hour)
+			if setErr := database.SetOrderPaymentHash(ctx, order.ID, invoice.PaymentHash, &expiresAt); setErr != nil {
 				log.Printf("failed to store payment hash: %v", setErr)
 			}
 			msg += fmt.Sprintf("\n\nPay invoice:\n%s", invoice.PaymentRequest)
