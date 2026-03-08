@@ -105,7 +105,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create and connect relay manager
-	relayMgr := nostr.NewRelayManager(cfg.Nostr.Relays, cfg.Nostr.BotPubkeyHex)
+	relayMgr := nostr.NewRelayManager(cfg.Nostr.Relays, cfg.Nostr.BotPubkeyHex, cfg.Nostr.BotSecretHex)
 	if err := relayMgr.Connect(ctx, highWaterMark); err != nil {
 		return fmt.Errorf("connecting to relays: %w", err)
 	}

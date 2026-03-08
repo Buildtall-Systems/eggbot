@@ -14,6 +14,7 @@ type RelayManager struct {
 	pool         *nostr.SimplePool
 	relayURLs    []string
 	botPubkeyHex string
+	botSecretHex string
 
 	// Event channels for consumers
 	dmEvents  chan *nostr.Event // kind:1059 gift-wrapped DMs
@@ -23,10 +24,11 @@ type RelayManager struct {
 }
 
 // NewRelayManager creates a new relay manager for the given relay URLs.
-func NewRelayManager(relayURLs []string, botPubkeyHex string) *RelayManager {
+func NewRelayManager(relayURLs []string, botPubkeyHex, botSecretHex string) *RelayManager {
 	return &RelayManager{
 		relayURLs:    relayURLs,
 		botPubkeyHex: botPubkeyHex,
+		botSecretHex: botSecretHex,
 		dmEvents:     make(chan *nostr.Event, 100),
 		zapEvents:    make(chan *nostr.Event, 100),
 	}
@@ -39,7 +41,13 @@ func (rm *RelayManager) Connect(ctx context.Context, since int64) error {
 	ctx, rm.cancel = context.WithCancel(ctx)
 
 	// Create pool with penalty box for exponential backoff on failures
-	rm.pool = nostr.NewSimplePool(ctx, nostr.WithPenaltyBox())
+	rm.pool = nostr.NewSimplePool(ctx,
+		nostr.WithPenaltyBox(),
+		nostr.WithAuthHandler(func(ctx context.Context, authEvent nostr.RelayEvent) error {
+			log.Printf("authenticating to relay %s", authEvent.Relay.URL)
+			return authEvent.Sign(rm.botSecretHex)
+		}),
+	)
 
 	// Subscribe to DMs and zap receipts addressed to the bot
 	// kind:4 = NIP-04 legacy DMs (deprecated but widely used)
