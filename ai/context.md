@@ -20,4 +20,5 @@ empty fields should be left empty... no "NA" or "*Not Found*"... nothing, just a
 
 | Library Name Searched | Context7 ID        | Local Reference Path               |
 |-----------------------|--------------------|------------------------------------|
+| go-nostr              | /nbd-wtf/go-nostr  |                                    |
 

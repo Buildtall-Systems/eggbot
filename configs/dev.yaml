@@ -6,9 +6,9 @@ database:
 
 nostr:
   relays:
+    - "wss://relay.nostr.io"
+    - "wss://relay.drss.io"
     - "wss://relay.damus.io"
-    - "wss://nos.lol"
-    - "wss://relay.nostr.band"
   bot_npub: "npub1srcs6w4mmkjdkm6n4dh69smakmauv09vxtfrap73gr8ampwzcc8sdutrts"
 
 lightning:

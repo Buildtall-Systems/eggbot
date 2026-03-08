@@ -330,3 +330,19 @@ Implemented `notify <qty>` command allowing customers to request DM notification
 **Test**: Added `TestEventProcessorFSM_ResetRequiredAfterEarlyExit` to document the bug pattern and verify the fix.
 
 **Verification**: All tests pass with race detector, lint clean, build successful.
+
+## 2026-03-08
+
+### NIP-42 Relay Authentication
+
+Added NIP-42 client authentication to eggbot's relay manager using go-nostr's `WithAuthHandler` pool option.
+
+**Changes**:
+- `internal/nostr/relay.go`: Added `botSecretHex` field to RelayManager, updated constructor signature, added `WithAuthHandler` closure to SimplePool creation that signs kind-22242 auth events
+- `internal/cli/run.go`: Updated NewRelayManager call to pass `cfg.Nostr.BotSecretHex`
+- `configs/dev.yaml`: Updated relay list to `relay.nostr.io`, `relay.drss.io`, `relay.damus.io`
+
+**Verification**: Lint clean, all tests pass, build successful.
+
+**Research**: `thoughts/research/2026-03-08_08-49-39_eggbot-nip42-authenticated-relays.md`
+**Plan**: `thoughts/plans/2026-03-08_11-42-27_eggbot-nip42-authenticated-relays.md`
