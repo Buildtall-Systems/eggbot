@@ -346,3 +346,7 @@ Added NIP-42 client authentication to eggbot's relay manager using go-nostr's `W
 
 **Research**: `thoughts/research/2026-03-08_08-49-39_eggbot-nip42-authenticated-relays.md`
 **Plan**: `thoughts/plans/2026-03-08_11-42-27_eggbot-nip42-authenticated-relays.md`
+
+### Eggbot Customer Skill
+
+Created a skill at `skills/eggbot/` for a customer's AI agent to interact with eggbot via Nostr DM. Covers all customer commands (inventory, order, cancel, balance, history, notify, help), payment flow (zap preferred), relay guidance (relay.nostr.io preferred with NIP-42, relay.damus.io public fallback), order lifecycle, error messages, and registration prerequisite. No implementation details exposed. Packaged as `skills/eggbot.zip`.
