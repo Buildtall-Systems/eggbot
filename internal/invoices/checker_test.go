@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Buildtall-Systems/btk/lightning"
 	"github.com/buildtall-systems/eggbot/internal/db"
-	"github.com/buildtall-systems/eggbot/internal/lightning"
 )
 
 func setupTestDB(t *testing.T) *db.DB {

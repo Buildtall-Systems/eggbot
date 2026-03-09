@@ -3,8 +3,8 @@ package commands
 import (
 	"context"
 
+	"github.com/Buildtall-Systems/btk/lightning"
 	"github.com/buildtall-systems/eggbot/internal/db"
-	"github.com/buildtall-systems/eggbot/internal/lightning"
 )
 
 type ExecuteConfig struct {

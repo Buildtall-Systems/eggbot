@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Buildtall-Systems/btk/lightning"
 	"github.com/buildtall-systems/eggbot/internal/db"
-	"github.com/buildtall-systems/eggbot/internal/lightning"
 )
 
 // Result holds the response from a command execution.
