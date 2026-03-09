@@ -16,7 +16,7 @@ Manage your **database schema** by creating incremental SQL changes or Go functi
 #### Features
 
 - Works against multiple databases:
-  - Postgres, MySQL, SQLite, YDB, ClickHouse, MSSQL, Vertica, and
+  - Postgres, MySQL, SQLite, YDB, ClickHouse, MSSQL, and
     more.
 - Supports Go migrations written as plain functions.
 - Supports [embedded](https://pkg.go.dev/embed/) migrations.
@@ -77,8 +77,8 @@ Drivers:
     redshift
     tidb
     clickhouse
-    vertica
     ydb
+    starrocks
 
 Examples:
     goose sqlite3 ./foo.db status
@@ -91,10 +91,10 @@ Examples:
     goose mysql "user:password@/dbname?parseTime=true" status
     goose redshift "postgres://user:password@qwerty.us-east-1.redshift.amazonaws.com:5439/db" status
     goose tidb "user:password@/dbname?parseTime=true" status
-    goose mssql "sqlserver://user:password@dbname:1433?database=master" status
+    goose mssql "sqlserver://user:password@hostname:1433?database=master" status
     goose clickhouse "tcp://127.0.0.1:9000" status
-    goose vertica "vertica://user:password@localhost:5433/dbname?connection_load_balance=1" status
     goose ydb "grpcs://localhost:2135/local?go_query_mode=scripting&go_fake_tx=scripting&go_query_bind=declare,numeric" status
+    goose starrocks "user:password@/dbname?parseTime=true&interpolateParams=true" status
 
     GOOSE_DRIVER=sqlite3 GOOSE_DBSTRING=./foo.db goose status
     GOOSE_DRIVER=sqlite3 GOOSE_DBSTRING=./foo.db goose create init sql
@@ -122,7 +122,7 @@ Options:
   -ssl-key string
         file path to SSL key in pem format (only support on mysql)
   -table string
-        migrations table name (default "goose_db_version")
+        migrations table name (default "goose_db_version"). If you use a schema that is not `public`, you should set `schemaname.goose_db_version` when running commands.
   -timeout duration
         maximum allowed duration for queries to run; e.g., 1h13m
   -v    enable verbose mode
@@ -234,6 +234,35 @@ Print the current version of the database:
     $ goose version
     $ goose: version 002
 
+# Environment Variables
+
+If you prefer to use environment variables, instead of passing the driver and database string as
+arguments, you can set the following environment variables:
+
+**1. Via environment variables:**
+
+```shell
+export GOOSE_DRIVER=DRIVER
+export GOOSE_DBSTRING=DBSTRING
+export GOOSE_MIGRATION_DIR=MIGRATION_DIR
+export GOOSE_TABLE=TABLENAME
+```
+
+**2. Via `.env` files with corresponding variables. `.env` file example**:
+
+```env
+GOOSE_DRIVER=postgres
+GOOSE_DBSTRING=postgres://admin:admin@localhost:5432/admin_db
+GOOSE_MIGRATION_DIR=./migrations
+GOOSE_TABLE=custom.goose_migrations
+```
+
+Loading from `.env` files is enabled by default. To disable this feature, set the `-env=none` flag.
+If you want to load from a specific file, set the `-env` flag to the file path.
+
+For more details about environment variables, see the [official documentation on environment
+variables](https://pressly.github.io/goose/documentation/environment-variables/).
+
 # Migrations
 
 goose supports migrations written in SQL or in Go.
@@ -270,6 +299,9 @@ Both Up and Down migrations within this file will be run without transactions.
 
 By default, SQL statements are delimited by semicolons - in fact, query statements must end with a
 semicolon to be properly recognized by goose.
+
+By default, all migrations are run on the public schema. If you want to use a different schema,
+specify the schema name using the table option like `-table='schemaname.goose_db_version`.
 
 More complex statements (PL/pgSQL) that have semicolons within them must be annotated with `--
 +goose StatementBegin` and `-- +goose StatementEnd` to be properly recognized. For example:
@@ -395,7 +427,8 @@ structure.
 1. Create your own goose binary, see [example](./examples/go-migrations)
 2. Import `github.com/pressly/goose`
 3. Register your migration functions
-4. Run goose command, ie. `goose.Up(db *sql.DB, dir string)`
+4. Include your `migrations` package into Go build: in `main.go`, `import _ "github.com/me/myapp/migrations"`
+5. Run goose command, ie. `goose.Up(db *sql.DB, dir string)`
 
 A [sample Go migration 00002_users_add_email.go file](./examples/go-migrations/00002_rename_root.go)
 looks like:
