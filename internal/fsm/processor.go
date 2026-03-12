@@ -9,9 +9,9 @@ import (
 
 type EventProcessorFSM struct {
 	fsm     *fsm.FSM
-	mu      sync.Mutex
 	onEnter map[string]func()
 	onLeave map[string]func()
+	mu      sync.Mutex
 }
 
 func NewEventProcessorFSM() *EventProcessorFSM {

@@ -8,9 +8,9 @@ func TestParse(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		wantNil  bool
 		wantName string
 		wantArgs []string
+		wantNil  bool
 	}{
 		{
 			name:    "empty string",
@@ -77,9 +77,9 @@ func TestParse(t *testing.T) {
 			wantArgs: []string{},
 		},
 		{
-			name:     "markdown comment only returns nil",
-			input:    "[//]: # (nip18)",
-			wantNil:  true,
+			name:    "markdown comment only returns nil",
+			input:   "[//]: # (nip18)",
+			wantNil: true,
 		},
 		{
 			name:     "markdown comment with leading whitespace",

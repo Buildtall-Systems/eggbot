@@ -4,14 +4,15 @@ import (
 	"context"
 
 	"github.com/Buildtall-Systems/btk/lightning"
+
 	"github.com/buildtall-systems/eggbot/internal/db"
 )
 
 type ExecuteConfig struct {
-	SatsPerHalfDozen int
-	Admins           []string
-	BotNpub          string
 	LightningBackend lightning.Backend
+	BotNpub          string
+	Admins           []string
+	SatsPerHalfDozen int
 }
 
 // Execute runs the command and returns a result.

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/buildtall-systems/eggbot/internal/fsm"
@@ -32,58 +33,58 @@ var ErrInvalidStateTransition = errors.New("invalid order state transition")
 
 // Customer represents a registered customer.
 type Customer struct {
-	ID        int64
-	Npub      string
-	Name      sql.NullString
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	Npub      string
+	Name      sql.NullString
+	ID        int64
 }
 
 type Order struct {
-	ID               int64
-	CustomerID       int64
-	Quantity         int
-	TotalSats        int64
-	Status           string
-	PaymentHash      sql.NullString
-	InvoiceExpiresAt sql.NullTime
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	InvoiceExpiresAt sql.NullTime
+	Status           string
+	PaymentHash      sql.NullString
+	ID               int64
+	CustomerID       int64
+	TotalSats        int64
+	Quantity         int
 }
 
 // OrderWithCustomer represents an order with customer info (for admin listing).
 type OrderWithCustomer struct {
-	ID           int64
-	CustomerNpub string
-	Quantity     int
-	TotalSats    int64
-	Status       string
 	CreatedAt    time.Time
+	CustomerNpub string
+	Status       string
+	ID           int64
+	TotalSats    int64
+	Quantity     int
 }
 
 // Transaction represents a zap payment record.
 type Transaction struct {
+	CreatedAt  time.Time
+	ZapEventID string
+	SenderNpub string
 	ID         int64
 	OrderID    sql.NullInt64
-	ZapEventID string
 	AmountSats int64
-	SenderNpub string
-	CreatedAt  time.Time
 }
 
 // InventoryNotification represents a customer's notification subscription.
 type InventoryNotification struct {
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 	ID            int64
 	CustomerID    int64
 	ThresholdEggs int
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
 }
 
 // InventoryNotificationWithCustomer includes customer npub for sending DMs.
 type InventoryNotificationWithCustomer struct {
-	InventoryNotification
 	CustomerNpub string
+	InventoryNotification
 }
 
 // GetInventory returns the current egg count.
@@ -246,7 +247,11 @@ func (db *DB) ListCustomers(ctx context.Context) ([]Customer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("querying customers: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("closing rows: %v", err)
+		}
+	}()
 
 	var customers []Customer
 	for rows.Next() {
@@ -270,7 +275,11 @@ func (db *DB) CreateOrder(ctx context.Context, customerID int64, quantity int, t
 	if err != nil {
 		return nil, fmt.Errorf("beginning transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && rbErr != sql.ErrTxDone {
+			log.Printf("rolling back transaction: %v", rbErr)
+		}
+	}()
 
 	// Reserve inventory atomically
 	result, err := tx.ExecContext(ctx, `
@@ -342,7 +351,11 @@ func (db *DB) GetCustomerOrders(ctx context.Context, customerID int64, limit int
 	if err != nil {
 		return nil, fmt.Errorf("querying orders: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("closing rows: %v", err)
+		}
+	}()
 
 	var orders []Order
 	for rows.Next() {
@@ -367,7 +380,11 @@ func (db *DB) GetPendingOrdersByCustomer(ctx context.Context, customerID int64) 
 	if err != nil {
 		return nil, fmt.Errorf("querying pending orders: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("closing rows: %v", err)
+		}
+	}()
 
 	var orders []Order
 	for rows.Next() {
@@ -396,7 +413,11 @@ func (db *DB) GetAllOrders(ctx context.Context, limit int) ([]OrderWithCustomer,
 	if err != nil {
 		return nil, fmt.Errorf("querying all orders: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("closing rows: %v", err)
+		}
+	}()
 
 	var orders []OrderWithCustomer
 	for rows.Next() {
@@ -421,7 +442,11 @@ func (db *DB) GetPaidOrdersByCustomer(ctx context.Context, customerID int64) ([]
 	if err != nil {
 		return nil, fmt.Errorf("querying paid orders: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("closing rows: %v", err)
+		}
+	}()
 
 	var orders []Order
 	for rows.Next() {
@@ -463,7 +488,11 @@ func (db *DB) GetPendingOrdersWithPaymentHash(ctx context.Context) ([]Order, err
 	if err != nil {
 		return nil, fmt.Errorf("querying pending orders with payment hash: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("closing rows: %v", err)
+		}
+	}()
 
 	var orders []Order
 	for rows.Next() {
@@ -487,7 +516,11 @@ func (db *DB) CancelOrder(ctx context.Context, orderID int64) error {
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && rbErr != sql.ErrTxDone {
+			log.Printf("rolling back transaction: %v", rbErr)
+		}
+	}()
 
 	var quantity int
 	var status string
@@ -538,7 +571,7 @@ func (db *DB) UpdateOrderStatus(ctx context.Context, orderID int64, newStatus st
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidStateTransition, order.Status, newStatus)
 	}
 
-	if _, err := orderSM.Transition(ctx, order.Status, event); err != nil {
+	if _, err = orderSM.Transition(ctx, order.Status, event); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidStateTransition, err)
 	}
 
@@ -735,7 +768,11 @@ func (db *DB) GetTriggeredNotifications(ctx context.Context, available int) ([]I
 	if err != nil {
 		return nil, fmt.Errorf("querying triggered notifications: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("closing rows: %v", err)
+		}
+	}()
 
 	var notifications []InventoryNotificationWithCustomer
 	for rows.Next() {

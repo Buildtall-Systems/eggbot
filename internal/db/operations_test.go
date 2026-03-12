@@ -8,6 +8,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Generated with: nak key generate && nak key public && nak encode npub
+const testNpub = "npub1zfj9z6qd9rxdwckj76f4uwms8wm7686d76tpq7fzduq8l9n0cxas5ctwvx"
+
 func setupTestDB(t *testing.T) *DB {
 	t.Helper()
 
@@ -43,7 +46,7 @@ func TestInventory(t *testing.T) {
 	}
 
 	// Add eggs
-	if err := db.AddEggs(ctx, 12); err != nil {
+	if err = db.AddEggs(ctx, 12); err != nil {
 		t.Fatalf("AddEggs: %v", err)
 	}
 
@@ -56,7 +59,7 @@ func TestInventory(t *testing.T) {
 	}
 
 	// Deduct eggs
-	if err := db.DeductEggs(ctx, 5); err != nil {
+	if err = db.DeductEggs(ctx, 5); err != nil {
 		t.Fatalf("DeductEggs: %v", err)
 	}
 
@@ -89,7 +92,7 @@ func TestGetReservedEggs(t *testing.T) {
 	}
 
 	// Create customer and inventory
-	c, _ := db.CreateCustomer(ctx, "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5")
+	c, _ := db.CreateCustomer(ctx, testNpub)
 	_ = db.AddEggs(ctx, 30)
 
 	// Create pending order - should be counted as reserved
@@ -135,7 +138,7 @@ func TestGetSoldEggs(t *testing.T) {
 	}
 
 	// Create customer and inventory
-	c, _ := db.CreateCustomer(ctx, "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5")
+	c, _ := db.CreateCustomer(ctx, testNpub)
 	_ = db.AddEggs(ctx, 30)
 
 	// Create and pay order - should be counted as sold
@@ -179,7 +182,7 @@ func TestCustomerCRUD(t *testing.T) {
 	ctx := context.Background()
 	db := setupTestDB(t)
 
-	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
+	npub := testNpub
 
 	// Customer should not exist
 	_, err := db.GetCustomerByNpub(ctx, npub)
@@ -221,7 +224,7 @@ func TestCustomerCRUD(t *testing.T) {
 	}
 
 	// Remove customer
-	if err := db.RemoveCustomer(ctx, npub); err != nil {
+	if err = db.RemoveCustomer(ctx, npub); err != nil {
 		t.Fatalf("RemoveCustomer: %v", err)
 	}
 
@@ -237,7 +240,7 @@ func TestOrderOperations(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Create customer
-	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
+	npub := testNpub
 	c, err := db.CreateCustomer(ctx, npub)
 	if err != nil {
 		t.Fatalf("CreateCustomer: %v", err)
@@ -283,7 +286,7 @@ func TestOrderOperations(t *testing.T) {
 	}
 
 	// Update status
-	if err := db.UpdateOrderStatus(ctx, order.ID, "paid"); err != nil {
+	if err = db.UpdateOrderStatus(ctx, order.ID, "paid"); err != nil {
 		t.Fatalf("UpdateOrderStatus: %v", err)
 	}
 
@@ -297,7 +300,7 @@ func TestFulfillOrder(t *testing.T) {
 	ctx := context.Background()
 	db := setupTestDB(t)
 
-	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
+	npub := testNpub
 	c, _ := db.CreateCustomer(ctx, npub)
 
 	_ = db.AddEggs(ctx, 10)
@@ -316,12 +319,12 @@ func TestFulfillOrder(t *testing.T) {
 	}
 
 	// Mark as paid first
-	if err := db.UpdateOrderStatus(ctx, order.ID, "paid"); err != nil {
+	if err = db.UpdateOrderStatus(ctx, order.ID, "paid"); err != nil {
 		t.Fatalf("UpdateOrderStatus to paid: %v", err)
 	}
 
 	// Now fulfill should succeed
-	if err := db.FulfillOrder(ctx, order.ID); err != nil {
+	if err = db.FulfillOrder(ctx, order.ID); err != nil {
 		t.Fatalf("FulfillOrder: %v", err)
 	}
 
@@ -346,7 +349,7 @@ func TestCreateOrder_ReservesInventory(t *testing.T) {
 	ctx := context.Background()
 	db := setupTestDB(t)
 
-	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
+	npub := testNpub
 	c, _ := db.CreateCustomer(ctx, npub)
 
 	// No inventory - order should fail
@@ -385,7 +388,7 @@ func TestTransactionsAndBalance(t *testing.T) {
 	ctx := context.Background()
 	db := setupTestDB(t)
 
-	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
+	npub := testNpub
 	c, _ := db.CreateCustomer(ctx, npub)
 
 	// Initial balance should be 0
@@ -454,7 +457,7 @@ func TestCancelOrder(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Create customer
-	npub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsutj2c5"
+	npub := testNpub
 	c, _ := db.CreateCustomer(ctx, npub)
 
 	// Add inventory (required for reservation model)

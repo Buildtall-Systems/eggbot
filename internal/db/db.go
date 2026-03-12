@@ -1,9 +1,11 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
+	"log"
 
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
@@ -24,13 +26,19 @@ func Open(dbPath string) (*DB, error) {
 
 	sqlDB.SetMaxOpenConns(1)
 
-	if _, err := sqlDB.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
-		_ = sqlDB.Close()
+	ctx := context.Background()
+
+	if _, err := sqlDB.ExecContext(ctx, `PRAGMA foreign_keys = ON;`); err != nil {
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			log.Printf("closing database after foreign key error: %v", closeErr)
+		}
 		return nil, fmt.Errorf("enabling foreign keys: %w", err)
 	}
 
-	if _, err := sqlDB.Exec(`PRAGMA journal_mode = WAL;`); err != nil {
-		_ = sqlDB.Close()
+	if _, err := sqlDB.ExecContext(ctx, `PRAGMA journal_mode = WAL;`); err != nil {
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			log.Printf("closing database after WAL error: %v", closeErr)
+		}
 		return nil, fmt.Errorf("setting WAL mode: %w", err)
 	}
 
@@ -55,7 +63,7 @@ func (db *DB) Migrate() error {
 // Returns 0 if no events have been processed yet.
 func (db *DB) GetHighWaterMark() (int64, error) {
 	var ts int64
-	err := db.QueryRow(`SELECT last_event_at FROM high_water_mark WHERE id = 1`).Scan(&ts)
+	err := db.QueryRowContext(context.Background(), `SELECT last_event_at FROM high_water_mark WHERE id = 1`).Scan(&ts)
 	if err != nil {
 		return 0, fmt.Errorf("getting high water mark: %w", err)
 	}
@@ -65,7 +73,7 @@ func (db *DB) GetHighWaterMark() (int64, error) {
 // SetHighWaterMark updates the high water mark if the given timestamp is greater
 // than the current value. This ensures we only move forward in time.
 func (db *DB) SetHighWaterMark(ts int64) error {
-	_, err := db.Exec(`
+	_, err := db.ExecContext(context.Background(), `
 		UPDATE high_water_mark
 		SET last_event_at = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = 1 AND last_event_at < ?
@@ -81,7 +89,7 @@ func (db *DB) SetHighWaterMark(ts int64) error {
 // Returns false if the event was already processed (caller should skip it).
 // Uses INSERT OR IGNORE for atomic deduplication.
 func (db *DB) TryProcess(eventID string, kind int, createdAt int64) (bool, error) {
-	result, err := db.Exec(`
+	result, err := db.ExecContext(context.Background(), `
 		INSERT OR IGNORE INTO processed_events (event_id, kind, created_at)
 		VALUES (?, ?, ?)
 	`, eventID, kind, createdAt)

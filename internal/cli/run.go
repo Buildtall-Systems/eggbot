@@ -12,6 +12,13 @@ import (
 	"time"
 
 	"github.com/Buildtall-Systems/btk/lightning"
+	gonostr "github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/keyer"
+	"github.com/nbd-wtf/go-nostr/nip04"
+	"github.com/nbd-wtf/go-nostr/nip19"
+	"github.com/nbd-wtf/go-nostr/nip59"
+	"github.com/spf13/cobra"
+
 	"github.com/buildtall-systems/eggbot/internal/commands"
 	"github.com/buildtall-systems/eggbot/internal/config"
 	"github.com/buildtall-systems/eggbot/internal/db"
@@ -20,12 +27,6 @@ import (
 	"github.com/buildtall-systems/eggbot/internal/invoices"
 	"github.com/buildtall-systems/eggbot/internal/nostr"
 	"github.com/buildtall-systems/eggbot/internal/zaps"
-	gonostr "github.com/nbd-wtf/go-nostr"
-	"github.com/nbd-wtf/go-nostr/keyer"
-	"github.com/nbd-wtf/go-nostr/nip04"
-	"github.com/nbd-wtf/go-nostr/nip19"
-	"github.com/nbd-wtf/go-nostr/nip59"
-	"github.com/spf13/cobra"
 )
 
 var runCmd = &cobra.Command{
@@ -62,9 +63,13 @@ func runBot(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}
-	defer func() { _ = database.Close() }()
+	defer func() {
+		if closeErr := database.Close(); closeErr != nil {
+			log.Printf("closing database: %v", closeErr)
+		}
+	}()
 
-	if err := database.Migrate(); err != nil {
+	if err = database.Migrate(); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
 	log.Printf("database ready")
@@ -121,15 +126,20 @@ func runBot(cmd *cobra.Command, args []string) error {
 		// Opportunistic NWC invoice check before processing events
 		checkResult := invoices.CheckPendingInvoices(ctx, database, lnBackend)
 		for _, settled := range checkResult.Settled {
-			_, custPubkeyHex, decErr := nip19.Decode(settled.Customer.Npub)
+			_, custPubkeyVal, decErr := nip19.Decode(settled.Customer.Npub)
 			if decErr != nil {
 				log.Printf("failed to decode customer npub %s: %v", settled.Customer.Npub, decErr)
+				continue
+			}
+			custPubkeyHex, ok := custPubkeyVal.(string)
+			if !ok {
+				log.Printf("unexpected type from nip19.Decode for %s", settled.Customer.Npub)
 				continue
 			}
 			custMsg := fmt.Sprintf("Payment confirmed for order #%d (%d sats). Thank you!",
 				settled.Order.ID, settled.Order.TotalSats)
 			sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
-				custPubkeyHex.(string), custMsg, dm.ProtocolNIP04)
+				custPubkeyHex, custMsg, dm.ProtocolNIP04)
 
 			adminMsg := fmt.Sprintf("NWC payment confirmed: order #%d (%d sats) from %s",
 				settled.Order.ID, settled.Order.TotalSats, settled.Customer.Npub)
@@ -178,13 +188,13 @@ func runBot(cmd *cobra.Command, args []string) error {
 				sharedSecret, err := nip04.ComputeSharedSecret(event.PubKey, cfg.Nostr.BotSecretHex)
 				if err != nil {
 					log.Printf("failed to compute shared secret: %v", err)
-					_ = database.SetHighWaterMark(eventTs)
+					setHighWaterMark(database, eventTs)
 					continue
 				}
 				messageContent, err = nip04.Decrypt(event.Content, sharedSecret)
 				if err != nil {
 					log.Printf("failed to decrypt NIP-04 DM: %v", err)
-					_ = database.SetHighWaterMark(eventTs)
+					setHighWaterMark(database, eventTs)
 					continue
 				}
 				senderPubkey = event.PubKey
@@ -196,7 +206,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 				})
 				if err != nil {
 					log.Printf("failed to unwrap DM: %v", err)
-					_ = database.SetHighWaterMark(eventTs)
+					setHighWaterMark(database, eventTs)
 					continue
 				}
 				senderPubkey = rumor.PubKey
@@ -204,12 +214,15 @@ func runBot(cmd *cobra.Command, args []string) error {
 
 			default:
 				log.Printf("unexpected DM kind: %d", event.Kind)
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
 			// Convert sender hex pubkey to npub for display
-			senderNpub, _ := nip19.EncodePublicKey(senderPubkey)
+			senderNpub, encErr := nip19.EncodePublicKey(senderPubkey)
+			if encErr != nil {
+				senderNpub = senderPubkey
+			}
 			log.Printf("DM from %s: %s", senderNpub, messageContent)
 
 			// Check for admin broadcast command (special syntax, handled before normal parsing)
@@ -217,13 +230,13 @@ func runBot(cmd *cobra.Command, args []string) error {
 				if !commands.IsAdmin(senderNpub, cfg.Admins) {
 					sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
 						senderPubkey, "Permission denied: broadcast requires admin privileges", incomingProtocol)
-					_ = database.SetHighWaterMark(eventTs)
+					setHighWaterMark(database, eventTs)
 					continue
 				}
 				if broadcastMsg == "" {
 					sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
 						senderPubkey, "Usage: message customers: <your message>", incomingProtocol)
-					_ = database.SetHighWaterMark(eventTs)
+					setHighWaterMark(database, eventTs)
 					continue
 				}
 
@@ -236,7 +249,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 				}
 				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
 					senderPubkey, summary, incomingProtocol)
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
@@ -244,7 +257,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 			parsedCmd := commands.Parse(messageContent)
 			if parsedCmd == nil {
 				log.Printf("empty message, ignoring")
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
@@ -252,7 +265,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 				log.Printf("unknown command: %s", parsedCmd.Name)
 				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex, senderPubkey,
 					fmt.Sprintf("Unknown command: %s. Send 'help' for available commands.", parsedCmd.Name), incomingProtocol)
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
@@ -261,7 +274,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 				log.Printf("permission denied for %s: %v", senderNpub, err)
 				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex, senderPubkey,
 					fmt.Sprintf("Permission denied: %v", err), incomingProtocol)
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
@@ -271,7 +284,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 			if err := processorFSM.Event(ctx, fsm.ProcessorEventCommandProcessed); err != nil {
 				log.Printf("FSM error on command processed: %v", err)
 				processorFSM.Reset()
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
@@ -293,7 +306,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 				responseMsg := fmt.Sprintf("Error: %v", result.Error)
 				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex, senderPubkey, responseMsg, incomingProtocol)
 				processorFSM.Reset()
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
@@ -301,7 +314,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 			if err := processorFSM.Event(ctx, fsm.ProcessorEventResponseSent); err != nil {
 				log.Printf("FSM error on response sent: %v", err)
 				processorFSM.Reset()
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
@@ -322,7 +335,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 
 			// Reset FSM to idle after DM processing completes
 			processorFSM.Reset()
-			_ = database.SetHighWaterMark(eventTs)
+			setHighWaterMark(database, eventTs)
 
 		case event := <-relayMgr.ZapEvents():
 			if event == nil {
@@ -358,7 +371,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 				} else {
 					log.Printf("invalid zap receipt: %v", err)
 				}
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
@@ -371,32 +384,32 @@ func runBot(cmd *cobra.Command, args []string) error {
 					log.Printf("duplicate zap event %s, ignoring", validatedZap.ZapEventID)
 				} else {
 					log.Printf("failed to process zap: %v", err)
-					if err := processorFSM.Event(ctx, fsm.ProcessorEventError); err != nil {
-						log.Printf("FSM error on zap process error: %v", err)
+					if fsmErr := processorFSM.Event(ctx, fsm.ProcessorEventError); fsmErr != nil {
+						log.Printf("FSM error on zap process error: %v", fsmErr)
 					}
 				}
 				processorFSM.Reset()
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
 			// Transition FSM to sending response state
-			if err := processorFSM.Event(ctx, fsm.ProcessorEventResponseSent); err != nil {
-				log.Printf("FSM error on response sent (zap): %v", err)
+			if fsmErr := processorFSM.Event(ctx, fsm.ProcessorEventResponseSent); fsmErr != nil {
+				log.Printf("FSM error on response sent (zap): %v", fsmErr)
 				processorFSM.Reset()
-				_ = database.SetHighWaterMark(eventTs)
+				setHighWaterMark(database, eventTs)
 				continue
 			}
 
 			log.Printf("zap processed: %s", processResult.Message)
 
 			// Send DM confirmation to zapper
-			_, senderPubkeyHex, err := nip19.Decode(validatedZap.SenderNpub)
+			_, senderPubkeyVal, err := nip19.Decode(validatedZap.SenderNpub)
 			if err != nil {
 				log.Printf("failed to decode sender npub: %v", err)
-			} else {
+			} else if senderHex, ok := senderPubkeyVal.(string); ok {
 				sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
-					senderPubkeyHex.(string), processResult.Message, dm.ProtocolNIP04)
+					senderHex, processResult.Message, dm.ProtocolNIP04)
 			}
 
 			// Notify admins of payment received
@@ -405,8 +418,15 @@ func runBot(cmd *cobra.Command, args []string) error {
 
 			// Reset FSM to idle after zap processing completes
 			processorFSM.Reset()
-			_ = database.SetHighWaterMark(eventTs)
+			setHighWaterMark(database, eventTs)
 		}
+	}
+}
+
+// setHighWaterMark updates the event high water mark, logging on failure.
+func setHighWaterMark(database *db.DB, ts int64) {
+	if err := database.SetHighWaterMark(ts); err != nil {
+		log.Printf("failed to set high water mark: %v", err)
 	}
 }
 
@@ -436,7 +456,10 @@ func sendResponse(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayMa
 	}
 
 	// Convert hex to npub for display
-	recipientNpub, _ := nip19.EncodePublicKey(recipientPubkeyHex)
+	recipientNpub, encErr := nip19.EncodePublicKey(recipientPubkeyHex)
+	if encErr != nil {
+		recipientNpub = recipientPubkeyHex
+	}
 	log.Printf("sent response to %s", recipientNpub)
 }
 
@@ -481,14 +504,20 @@ func broadcastToCustomers(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr
 	}
 
 	for _, customer := range customers {
-		_, pubkeyHex, err := nip19.Decode(customer.Npub)
+		_, pubkeyVal, err := nip19.Decode(customer.Npub)
 		if err != nil {
 			log.Printf("failed to decode customer npub %s: %v", customer.Npub, err)
 			failed++
 			continue
 		}
+		pubkeyHex, ok := pubkeyVal.(string)
+		if !ok {
+			log.Printf("unexpected type from nip19.Decode for %s", customer.Npub)
+			failed++
+			continue
+		}
 		sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
-			pubkeyHex.(string), message, dm.ProtocolNIP04)
+			pubkeyHex, message, dm.ProtocolNIP04)
 		sent++
 	}
 	return sent, failed
@@ -497,13 +526,18 @@ func broadcastToCustomers(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr
 // notifyAdmins sends a DM to all configured admins.
 func notifyAdmins(ctx context.Context, kr gonostr.Keyer, relayMgr *nostr.RelayManager, cfg *config.Config, message string) {
 	for _, adminNpub := range cfg.Admins {
-		_, adminPubkeyHex, err := nip19.Decode(adminNpub)
+		_, adminPubkeyVal, err := nip19.Decode(adminNpub)
 		if err != nil {
 			log.Printf("failed to decode admin npub %s: %v", adminNpub, err)
 			continue
 		}
+		adminPubkeyHex, ok := adminPubkeyVal.(string)
+		if !ok {
+			log.Printf("unexpected type from nip19.Decode for %s", adminNpub)
+			continue
+		}
 		sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
-			adminPubkeyHex.(string), message, dm.ProtocolNIP04)
+			adminPubkeyHex, message, dm.ProtocolNIP04)
 	}
 }
 
@@ -529,15 +563,20 @@ func checkInventoryNotifications(ctx context.Context, kr gonostr.Keyer, relayMgr
 	}
 
 	for _, n := range notifications {
-		_, pubkeyHex, err := nip19.Decode(n.CustomerNpub)
+		_, pubkeyVal, err := nip19.Decode(n.CustomerNpub)
 		if err != nil {
 			log.Printf("failed to decode customer npub %s: %v", n.CustomerNpub, err)
+			continue
+		}
+		pubkeyHex, ok := pubkeyVal.(string)
+		if !ok {
+			log.Printf("unexpected type from nip19.Decode for %s", n.CustomerNpub)
 			continue
 		}
 
 		msg := fmt.Sprintf("🥚 Inventory alert: %d eggs are now available!", available)
 		sendResponse(ctx, kr, relayMgr, cfg.Nostr.BotSecretHex, cfg.Nostr.BotPubkeyHex,
-			pubkeyHex.(string), msg, dm.ProtocolNIP04)
+			pubkeyHex, msg, dm.ProtocolNIP04)
 
 		if err := database.DeleteInventoryNotificationByID(ctx, n.ID); err != nil {
 			log.Printf("failed to delete notification %d: %v", n.ID, err)

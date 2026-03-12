@@ -14,8 +14,8 @@ import (
 // ValidatedZap contains extracted information from a valid zap receipt.
 type ValidatedZap struct {
 	SenderNpub string // Npub of the zapper
-	AmountSats int64  // Amount in sats (from bolt11)
 	ZapEventID string // Event ID of the zap receipt
+	AmountSats int64  // Amount in sats (from bolt11)
 }
 
 // ErrInvalidZapReceipt indicates the zap receipt is malformed or invalid.
@@ -42,8 +42,14 @@ func ValidateZapReceipt(event *nostr.Event, lnurlPubkeyHex string) (*ValidatedZa
 	// Verify zap provider if configured
 	if lnurlPubkeyHex != "" && event.PubKey != lnurlPubkeyHex {
 		// Convert hex to npub for human-readable error message
-		expectedNpub, _ := nip19.EncodePublicKey(lnurlPubkeyHex)
-		gotNpub, _ := nip19.EncodePublicKey(event.PubKey)
+		expectedNpub, encErr := nip19.EncodePublicKey(lnurlPubkeyHex)
+		if encErr != nil {
+			return nil, fmt.Errorf("encoding expected npub: %w", encErr)
+		}
+		gotNpub, encErr := nip19.EncodePublicKey(event.PubKey)
+		if encErr != nil {
+			return nil, fmt.Errorf("encoding event npub: %w", encErr)
+		}
 		return nil, fmt.Errorf("%w: expected %s, got %s", ErrUnauthorizedZapProvider, expectedNpub, gotNpub)
 	}
 
@@ -56,7 +62,7 @@ func ValidateZapReceipt(event *nostr.Event, lnurlPubkeyHex string) (*ValidatedZa
 
 	// Parse zap request from description
 	var zapRequest nostr.Event
-	if err := json.Unmarshal([]byte(descJSON), &zapRequest); err != nil {
+	if err = json.Unmarshal([]byte(descJSON), &zapRequest); err != nil {
 		return nil, fmt.Errorf("%w: invalid zap request JSON: %v", ErrInvalidZapReceipt, err)
 	}
 

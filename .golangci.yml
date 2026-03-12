@@ -1,0 +1,103 @@
+# buildtall.systems canonical golangci-lint configuration
+# This is the single source of truth. Do not edit project copies directly.
+# Use `make lint-sync` at repo root to propagate changes.
+# Compatible with golangci-lint v2
+
+version: "2"
+
+run:
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/buildtall-systems
+
+linters:
+  default: none
+  enable:
+    # Core Go checks
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+    # Type safety
+    - unconvert
+    # Security
+    - gosec
+    # Resource management
+    - bodyclose
+    - noctx
+    - sqlclosecheck
+    # Code quality
+    - goconst
+    - misspell
+    - nolintlint
+    - prealloc
+    - godox
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    govet:
+      enable-all: true
+    gosec:
+      excludes: []
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    godox:
+      keywords:
+        - nolint
+
+  exclusions:
+    rules:
+      # Relax errcheck in test files - common pattern, reduces noise
+      - path: _test\.go
+        linters:
+          - errcheck
+      # Allow hardcoded credentials in test files (test fixtures)
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "Potential hardcoded credentials"
+      # Allow 0644 file permissions in test files (test fixtures)
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "Expect WriteFile permissions"
+      # Allow XSS taint analysis in test files
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "XSS via taint analysis"
+      # Allow file inclusion via variable in test files
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "Potential file inclusion via variable"
+      # Allow SSRF taint analysis in test files
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "SSRF via taint analysis"
+      # Relax godox and nolintlint in test files
+      - path: _test\.go
+        linters:
+          - godox
+          - nolintlint
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

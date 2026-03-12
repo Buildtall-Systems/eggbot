@@ -5,12 +5,13 @@ import (
 	"log"
 
 	"github.com/Buildtall-Systems/btk/lightning"
+
 	"github.com/buildtall-systems/eggbot/internal/db"
 )
 
 type SettledOrder struct {
-	Order    db.Order
 	Customer *db.Customer
+	Order    db.Order
 }
 
 type CheckResult struct {

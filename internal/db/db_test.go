@@ -20,7 +20,7 @@ func TestHighWaterMark(t *testing.T) {
 		_ = os.Remove(dbPath)
 	}()
 
-	if err := db.Migrate(); err != nil {
+	if err = db.Migrate(); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
 
@@ -34,7 +34,7 @@ func TestHighWaterMark(t *testing.T) {
 	}
 
 	// Set to 100
-	if err := db.SetHighWaterMark(100); err != nil {
+	if err = db.SetHighWaterMark(100); err != nil {
 		t.Fatalf("SetHighWaterMark(100) error: %v", err)
 	}
 
@@ -47,7 +47,7 @@ func TestHighWaterMark(t *testing.T) {
 	}
 
 	// Set to 200 (higher) - should update
-	if err := db.SetHighWaterMark(200); err != nil {
+	if err = db.SetHighWaterMark(200); err != nil {
 		t.Fatalf("SetHighWaterMark(200) error: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestHighWaterMark(t *testing.T) {
 	}
 
 	// Set to 150 (lower) - should NOT update
-	if err := db.SetHighWaterMark(150); err != nil {
+	if err = db.SetHighWaterMark(150); err != nil {
 		t.Fatalf("SetHighWaterMark(150) error: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestTryProcess(t *testing.T) {
 		_ = os.Remove(dbPath)
 	}()
 
-	if err := db.Migrate(); err != nil {
+	if err = db.Migrate(); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
 

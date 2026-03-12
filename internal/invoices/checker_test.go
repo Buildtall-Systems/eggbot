@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Buildtall-Systems/btk/lightning"
+
 	"github.com/buildtall-systems/eggbot/internal/db"
 )
 
@@ -33,7 +34,7 @@ func createPendingOrderWithHash(t *testing.T, database *db.DB, npub string, paym
 		t.Fatalf("failed to create customer: %v", err)
 	}
 
-	if err := database.SetInventory(ctx, 100); err != nil {
+	if err = database.SetInventory(ctx, 100); err != nil {
 		t.Fatalf("failed to set inventory: %v", err)
 	}
 
@@ -43,7 +44,7 @@ func createPendingOrderWithHash(t *testing.T, database *db.DB, npub string, paym
 	}
 
 	expiresAt := time.Now().UTC().Add(1 * time.Hour)
-	if err := database.SetOrderPaymentHash(ctx, order.ID, paymentHash, &expiresAt); err != nil {
+	if err = database.SetOrderPaymentHash(ctx, order.ID, paymentHash, &expiresAt); err != nil {
 		t.Fatalf("failed to set payment hash: %v", err)
 	}
 
@@ -68,7 +69,7 @@ func TestCheckPendingInvoices_Settled(t *testing.T) {
 
 	customer, _ := createPendingOrderWithHash(t, database, "npub1settled", inv.PaymentHash)
 
-	if err := backend.MarkPaid(inv.PaymentHash); err != nil {
+	if err = backend.MarkPaid(inv.PaymentHash); err != nil {
 		t.Fatalf("failed to mark paid: %v", err)
 	}
 
