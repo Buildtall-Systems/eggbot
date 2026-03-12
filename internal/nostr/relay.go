@@ -12,15 +12,12 @@ import (
 // RelayManager handles connections to multiple Nostr relays and manages subscriptions.
 type RelayManager struct {
 	pool         *nostr.SimplePool
-	relayURLs    []string
+	dmEvents     chan *nostr.Event // kind:1059 gift-wrapped DMs
+	zapEvents    chan *nostr.Event // kind:9735 zap receipts
+	cancel       context.CancelFunc
 	botPubkeyHex string
 	botSecretHex string
-
-	// Event channels for consumers
-	dmEvents  chan *nostr.Event // kind:1059 gift-wrapped DMs
-	zapEvents chan *nostr.Event // kind:9735 zap receipts
-
-	cancel context.CancelFunc
+	relayURLs    []string
 }
 
 // NewRelayManager creates a new relay manager for the given relay URLs.

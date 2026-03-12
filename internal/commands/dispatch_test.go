@@ -28,8 +28,8 @@ func TestExecute(t *testing.T) {
 		name        string
 		cmd         *Command
 		npub        string
-		wantErr     bool
 		msgContains string
+		wantErr     bool
 	}{
 		{
 			name:        "inventory command",

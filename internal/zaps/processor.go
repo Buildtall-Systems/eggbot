@@ -10,9 +10,9 @@ import (
 
 // ProcessResult contains the outcome of processing a zap.
 type ProcessResult struct {
-	CustomerFound bool   // Whether the sender is a registered customer
-	AmountSats    int64  // Amount credited
 	Message       string // Human-readable result message
+	AmountSats    int64  // Amount credited
+	CustomerFound bool   // Whether the sender is a registered customer
 }
 
 // ErrDuplicateZap indicates the zap has already been processed.

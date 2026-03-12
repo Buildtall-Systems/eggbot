@@ -27,10 +27,10 @@ func TestDeliverCmd(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		args        []string
-		wantErr     bool
 		errContains string
 		msgContains string
+		args        []string
+		wantErr     bool
 	}{
 		{
 			name:        "no args",
@@ -138,10 +138,10 @@ func TestMarkpaidCmd(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		args        []string
-		wantErr     bool
 		errContains string
 		msgContains string
+		args        []string
+		wantErr     bool
 	}{
 		{
 			name:        "no args",
@@ -199,10 +199,10 @@ func TestAdjustCmd(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		args        []string
-		wantErr     bool
 		errContains string
 		msgContains string
+		args        []string
+		wantErr     bool
 	}{
 		{
 			name:        "positive adjustment",
@@ -277,10 +277,10 @@ func TestAddCustomerCmd(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		args        []string
-		wantErr     bool
 		errContains string
 		msgContains string
+		args        []string
+		wantErr     bool
 	}{
 		{
 			name:        "no args",
@@ -394,10 +394,10 @@ func TestRemoveCustomerCmd(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		args        []string
-		wantErr     bool
 		errContains string
 		msgContains string
+		args        []string
+		wantErr     bool
 	}{
 		{
 			name:        "no args",
@@ -491,4 +491,3 @@ func TestSalesCmd(t *testing.T) {
 		t.Errorf("expected 9600 sats (3200+6400), got %q", result.Message)
 	}
 }
-

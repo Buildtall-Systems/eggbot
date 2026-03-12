@@ -8,11 +8,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Test npubs (generated for testing, not real keys)
+// Generated with: nak key generate && nak key public && nak encode npub
 const (
-	adminNpub    = "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqshp52w2"
-	customerNpub = "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpqdangsl"
-	unknownNpub  = "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqz5nl2kt"
+	adminNpub    = "npub10r67600hzrjqfjprydg0a25u9vry9zkjn8ukf9ynh9y2whlxrjesxdl8rn"
+	customerNpub = "npub1cccr2442yt4qkuejczqc9tzuxzfq8gtvjkzf8q3lvx5eyn8rjacq3mnvjx"
+	unknownNpub  = "npub1lqq6patcatq5nkrk5qfqest6qpu4x6xhg0ydly5j9x4sxhxj78eq4c9kxq"
 )
 
 func TestIsAdmin(t *testing.T) {
@@ -57,13 +57,15 @@ func TestIsAdmin(t *testing.T) {
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 
+	ctx := context.Background()
+
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("opening test db: %v", err)
 	}
 
 	// Create customers table
-	_, err = db.Exec(`
+	_, err = db.ExecContext(ctx, `
 		CREATE TABLE customers (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			npub TEXT NOT NULL UNIQUE,
@@ -76,7 +78,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	}
 
 	// Insert test customer
-	_, err = db.Exec("INSERT INTO customers (npub) VALUES (?)", customerNpub)
+	_, err = db.ExecContext(ctx, "INSERT INTO customers (npub) VALUES (?)", customerNpub)
 	if err != nil {
 		t.Fatalf("inserting test customer: %v", err)
 	}
@@ -86,7 +88,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 func TestIsCustomer(t *testing.T) {
 	db := setupTestDB(t)
-	defer func() { _ = db.Close() }()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Logf("closing test db: %v", err)
+		}
+	})
 
 	ctx := context.Background()
 	admins := []string{adminNpub}
@@ -140,7 +146,11 @@ func TestIsCustomer(t *testing.T) {
 
 func TestCanExecute(t *testing.T) {
 	db := setupTestDB(t)
-	defer func() { _ = db.Close() }()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Logf("closing test db: %v", err)
+		}
+	})
 
 	ctx := context.Background()
 	admins := []string{adminNpub}

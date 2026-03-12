@@ -7,9 +7,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/buildtall-systems/eggbot/internal/db"
 	"github.com/nbd-wtf/go-nostr/nip19"
+
+	"github.com/buildtall-systems/eggbot/internal/db"
 )
+
+const bech32PrefixNpub = "npub"
 
 // DeliverCmd fulfills a specific paid order by ID.
 // Args: [order_id]
@@ -111,7 +114,7 @@ func AdjustCmd(ctx context.Context, database *db.DB, args []string) Result {
 
 	// Validate npub
 	prefix, _, err := nip19.Decode(npub)
-	if err != nil || prefix != "npub" {
+	if err != nil || prefix != bech32PrefixNpub {
 		return Result{Error: errors.New("invalid npub")}
 	}
 
@@ -197,7 +200,7 @@ func AddCustomerCmd(ctx context.Context, database *db.DB, args []string) Result 
 
 	// Validate npub
 	prefix, _, err := nip19.Decode(npub)
-	if err != nil || prefix != "npub" {
+	if err != nil || prefix != bech32PrefixNpub {
 		return Result{Error: errors.New("invalid npub")}
 	}
 
@@ -226,7 +229,7 @@ func RemoveCustomerCmd(ctx context.Context, database *db.DB, args []string) Resu
 
 	// Validate npub
 	prefix, _, err := nip19.Decode(npub)
-	if err != nil || prefix != "npub" {
+	if err != nil || prefix != bech32PrefixNpub {
 		return Result{Error: errors.New("invalid npub")}
 	}
 
@@ -259,7 +262,7 @@ func SalesCmd(ctx context.Context, database *db.DB) Result {
 // Args: [npub] [quantity]
 func SellCmd(ctx context.Context, database *db.DB, args []string, satsPerHalfDozen int) Result {
 	if len(args) < 2 {
-		return Result{Error: errors.New("usage: sell <npub> <quantity> (6 or 12)")}
+		return Result{Error: errors.New("usage: sell <npub> <quantity> (multiple of 6)")}
 	}
 
 	npub := args[0]
@@ -269,17 +272,17 @@ func SellCmd(ctx context.Context, database *db.DB, args []string, satsPerHalfDoz
 
 	// Validate npub
 	prefix, _, err := nip19.Decode(npub)
-	if err != nil || prefix != "npub" {
+	if err != nil || prefix != bech32PrefixNpub {
 		return Result{Error: errors.New("invalid npub")}
 	}
 
 	quantity, err := strconv.Atoi(args[1])
 	if err != nil {
-		return Result{Error: errors.New("quantity must be 6 or 12")}
+		return Result{Error: errors.New("quantity must be a positive multiple of 6")}
 	}
 
-	if quantity != 6 && quantity != 12 {
-		return Result{Error: errors.New("quantity must be 6 or 12")}
+	if quantity < 6 || quantity%6 != 0 {
+		return Result{Error: errors.New("quantity must be a positive multiple of 6")}
 	}
 
 	// Get customer
@@ -299,7 +302,10 @@ func SellCmd(ctx context.Context, database *db.DB, args []string, satsPerHalfDoz
 	order, err := database.CreateOrder(ctx, customer.ID, quantity, totalSats)
 	if err != nil {
 		if errors.Is(err, db.ErrInsufficientInventory) {
-			available, _ := database.GetInventory(ctx)
+			available, invErr := database.GetInventory(ctx)
+			if invErr != nil {
+				return Result{Error: fmt.Errorf("insufficient inventory (could not check count: %w)", invErr)}
+			}
 			return Result{Error: fmt.Errorf("only %d eggs available, cannot sell %d", available, quantity)}
 		}
 		return Result{Error: fmt.Errorf("creating order: %w", err)}
@@ -313,4 +319,3 @@ func SellCmd(ctx context.Context, database *db.DB, args []string, satsPerHalfDoz
 
 	return Result{Message: fmt.Sprintf("Created order #%d: %d eggs for %s (%d sats, pending)", order.ID, quantity, npubShort, totalSats)}
 }
-

@@ -27,7 +27,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.eggbot.yaml)")
 	rootCmd.PersistentFlags().Bool("verbose", false, "verbose output")
 
-	_ = viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
+	if err := viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose")); err != nil {
+		fmt.Fprintf(os.Stderr, "Error binding verbose flag: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func initConfig() {

@@ -8,6 +8,9 @@ import (
 	"github.com/nbd-wtf/go-nostr/nip19"
 )
 
+// Generated with: nak key generate && nak key public
+const testSecretHex = "234702910939c3394838131938e8da0dcfec369df3e51990263eae626aa73f87"
+
 func TestExtractAmountFromBolt11(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -97,7 +100,7 @@ func TestValidateZapReceipt_MissingDescription(t *testing.T) {
 	}
 
 	// Sign it
-	sk := "234702910939c3394838131938e8da0dcfec369df3e51990263eae626aa73f87" // test key
+	sk := testSecretHex
 	_ = event.Sign(sk)
 
 	_, err := ValidateZapReceipt(event, "")
@@ -117,7 +120,7 @@ func TestValidateZapReceipt_InvalidZapRequest(t *testing.T) {
 		},
 	}
 
-	sk := "234702910939c3394838131938e8da0dcfec369df3e51990263eae626aa73f87"
+	sk := testSecretHex
 	_ = event.Sign(sk)
 
 	_, err := ValidateZapReceipt(event, "")
@@ -145,7 +148,7 @@ func TestValidateZapReceipt_WrongZapRequestKind(t *testing.T) {
 		},
 	}
 
-	sk := "234702910939c3394838131938e8da0dcfec369df3e51990263eae626aa73f87"
+	sk := testSecretHex
 	_ = event.Sign(sk)
 
 	_, err := ValidateZapReceipt(event, "")
@@ -176,7 +179,7 @@ func TestValidateZapReceipt_UnauthorizedProvider(t *testing.T) {
 	}
 
 	// Sign with one key
-	sk := "234702910939c3394838131938e8da0dcfec369df3e51990263eae626aa73f87"
+	sk := testSecretHex
 	_ = event.Sign(sk)
 
 	// But expect a different LNURL provider
@@ -203,7 +206,7 @@ func TestValidateZapReceipt_Valid(t *testing.T) {
 	zapRequestJSON, _ := json.Marshal(zapRequest)
 
 	// LNURL provider key
-	providerSk := "234702910939c3394838131938e8da0dcfec369df3e51990263eae626aa73f87"
+	providerSk := testSecretHex
 	providerPk, _ := nostr.GetPublicKey(providerSk)
 
 	// Create zap receipt (kind 9735) signed by LNURL provider

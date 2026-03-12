@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/buildtall-systems/eggbot/internal/db"
 	_ "modernc.org/sqlite"
+
+	"github.com/buildtall-systems/eggbot/internal/db"
 )
 
 func setupCmdTestDB(t *testing.T) *db.DB {
@@ -42,7 +43,7 @@ const (
 	// Admin keypair
 	testAdminSecretHex = "044d5d4b5961612682ce0749a9ad7f8527b42d95ab9b8cf7a2d7dd6175d8639d"
 	testAdminPubkeyHex = "f28af81d4e2150fdf2366d373a125b22014397460aed537b370a58d116d5a158"
-	testAdminNpub = "npub17290s82wy9g0mu3kd5mn5yjmygq5896xptk4x7ehpfvdz9k459vqywh6q7"
+	testAdminNpub      = "npub17290s82wy9g0mu3kd5mn5yjmygq5896xptk4x7ehpfvdz9k459vqywh6q7"
 )
 
 func TestInventoryCmd_Show(t *testing.T) {
@@ -96,11 +97,11 @@ func TestInventoryCmd_Add(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		errContains string
+		msgContains string
 		args        []string
 		isAdmin     bool
 		wantErr     bool
-		errContains string
-		msgContains string
 	}{
 		{
 			name:        "non-admin denied",
@@ -170,11 +171,11 @@ func TestInventoryCmd_Set(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		errContains string
+		msgContains string
 		args        []string
 		isAdmin     bool
 		wantErr     bool
-		errContains string
-		msgContains string
 	}{
 		{
 			name:        "non-admin denied",
@@ -348,11 +349,11 @@ func TestOrderCmd(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		args        []string
 		setup       func() // cancel any pending orders
-		wantErr     bool
 		errContains string
 		msgContains string
+		args        []string
+		wantErr     bool
 	}{
 		{
 			name:        "no args",
@@ -364,31 +365,31 @@ func TestOrderCmd(t *testing.T) {
 			name:        "invalid quantity string",
 			args:        []string{"abc"},
 			wantErr:     true,
-			errContains: "6 or 12",
+			errContains: "multiple of 6",
 		},
 		{
 			name:        "zero quantity",
 			args:        []string{"0"},
 			wantErr:     true,
-			errContains: "6 or 12",
+			errContains: "multiple of 6",
 		},
 		{
 			name:        "quantity 1 rejected",
 			args:        []string{"1"},
 			wantErr:     true,
-			errContains: "6 or 12",
+			errContains: "multiple of 6",
 		},
 		{
 			name:        "quantity 7 rejected",
 			args:        []string{"7"},
 			wantErr:     true,
-			errContains: "6 or 12",
+			errContains: "multiple of 6",
 		},
 		{
-			name:        "quantity 18 rejected (over max)",
+			name:        "valid order 18 eggs",
 			args:        []string{"18"},
-			wantErr:     true,
-			errContains: "6 or 12",
+			wantErr:     false,
+			msgContains: "18 eggs reserved",
 		},
 		{
 			name:        "valid order 6 eggs",
@@ -614,10 +615,10 @@ func TestCancelOrderCmd(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		args        []string
-		wantErr     bool
 		errContains string
 		msgContains string
+		args        []string
+		wantErr     bool
 	}{
 		{
 			name:        "no args",

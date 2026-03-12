@@ -27,21 +27,25 @@
 //
 //	OS      Arch    SQLite version
 //	------------------------------
-//	darwin	amd64   3.46.0
-//	darwin	arm64   3.46.0
-//	freebsd	amd64   3.46.0
-//	freebsd	arm64   3.46.0
-//	linux	386     3.46.0
-//	linux	amd64   3.46.0
-//	linux	arm     3.46.0
-//	linux	arm64   3.46.0
-//	linux	loong64 3.46.0
-//	linux	ppc64le 3.46.0
-//	linux	riscv64 3.46.0
-//	linux	s390x   3.46.0
-//	windows	386     3.46.0
-//	windows	amd64   3.46.0
-//	windows	arm64   3.46.0
+//	darwin	amd64   3.50.1
+//	darwin	arm64   3.50.1
+//	freebsd	amd64   3.50.1
+//	freebsd	arm64   3.50.1
+//	linux	386     3.50.1
+//	linux	amd64   3.50.1
+//	linux	arm     3.50.1
+//	linux	arm64   3.50.1
+//	linux	loong64 3.50.1
+//	linux	ppc64le 3.50.1
+//	linux	riscv64 3.50.1
+//	linux	s390x   3.50.1
+//	windows	386     3.50.1
+//	windows	amd64   3.50.1
+//	windows	arm64   3.50.1
+//
+// # Benchmarks
+//
+// [The SQLite Drivers Benchmarks Game]
 //
 // # Builders
 //
@@ -50,6 +54,10 @@
 // https://modern-c.appspot.com/-/builder/?importpath=modernc.org%2fsqlite
 //
 // # Changelog
+//
+//   - 2025-06-09 v1.38.0: Upgrade to SQLite 3.50.1.
+// 
+//   - 2025-02-26 v1.36.0: Upgrade to SQLite 3.49.0.
 //
 //   - 2024-11-16 v1.34.0: Implement ResetSession and IsValid methods in connection
 //
@@ -287,4 +295,6 @@
 // # Sqlite documentation
 //
 // See https://sqlite.org/docs.html
+//
+// [The SQLite Drivers Benchmarks Game]: https://pkg.go.dev/modernc.org/sqlite-bench#readme-tl-dr-scorecard
 package sqlite // import "modernc.org/sqlite"

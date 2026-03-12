@@ -11,12 +11,12 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
-	Verbose   bool
-	Database  DatabaseConfig
 	Nostr     NostrConfig
 	Lightning LightningConfig
-	Pricing   PricingConfig
+	Database  DatabaseConfig
 	Admins    []string // npubs of admin users
+	Pricing   PricingConfig
+	Verbose   bool
 }
 
 // DatabaseConfig holds database settings.
@@ -26,16 +26,16 @@ type DatabaseConfig struct {
 
 // NostrConfig holds Nostr-related settings.
 type NostrConfig struct {
-	Relays        []string
-	BotNpub       string // Bot's public key in npub format (from config)
-	BotSecretHex  string // Bot's secret key in hex (derived from EGGBOT_NSEC env)
-	BotPubkeyHex  string // Bot's public key in hex (derived from secret)
+	BotNpub      string // Bot's public key in npub format (from config)
+	BotSecretHex string // Bot's secret key in hex (derived from EGGBOT_NSEC env)
+	BotPubkeyHex string // Bot's public key in hex (derived from secret)
+	Relays       []string
 }
 
 type LightningConfig struct {
 	LnurlNpub           string
 	LnurlPubkeyHex      string
-	NWCConnectionString  string
+	NWCConnectionString string
 }
 
 // PricingConfig holds egg pricing settings.

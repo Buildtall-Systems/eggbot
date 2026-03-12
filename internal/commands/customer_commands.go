@@ -9,14 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Buildtall-Systems/btk/lightning"
+
 	"github.com/buildtall-systems/eggbot/internal/db"
-	"github.com/buildtall-systems/eggbot/internal/lightning"
 )
 
 // Result holds the response from a command execution.
 type Result struct {
-	Message string
 	Error   error
+	Message string
 }
 
 // InventoryCmd handles inventory commands.
@@ -104,7 +105,7 @@ func inventoryAdd(ctx context.Context, database *db.DB, args []string) Result {
 		return Result{Error: errors.New("quantity must be a positive number")}
 	}
 
-	if err := database.AddEggs(ctx, quantity); err != nil {
+	if err = database.AddEggs(ctx, quantity); err != nil {
 		return Result{Error: fmt.Errorf("adding eggs: %w", err)}
 	}
 
@@ -136,17 +137,17 @@ func inventorySet(ctx context.Context, database *db.DB, args []string) Result {
 
 func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []string, satsPerHalfDozen int, botNpub string, lnBackend lightning.Backend) Result {
 	if len(args) < 1 {
-		return Result{Error: errors.New("usage: order <quantity> (6 or 12)")}
+		return Result{Error: errors.New("usage: order <quantity> (multiple of 6)")}
 	}
 
 	quantity, err := strconv.Atoi(args[0])
 	if err != nil {
-		return Result{Error: errors.New("quantity must be 6 or 12")}
+		return Result{Error: errors.New("quantity must be a positive multiple of 6")}
 	}
 
-	// Only allow multiples of 6, max 12
-	if quantity != 6 && quantity != 12 {
-		return Result{Error: errors.New("quantity must be 6 or 12")}
+	// Only allow positive multiples of 6
+	if quantity < 6 || quantity%6 != 0 {
+		return Result{Error: errors.New("quantity must be a positive multiple of 6")}
 	}
 
 	// Get customer by npub
@@ -172,8 +173,10 @@ func OrderCmd(ctx context.Context, database *db.DB, senderNpub string, args []st
 	order, err := database.CreateOrder(ctx, customer.ID, quantity, totalSats)
 	if err != nil {
 		if errors.Is(err, db.ErrInsufficientInventory) {
-			// Get current inventory for helpful error message
-			available, _ := database.GetInventory(ctx)
+			available, invErr := database.GetInventory(ctx)
+			if invErr != nil {
+				return Result{Error: fmt.Errorf("insufficient inventory (could not check count: %w)", invErr)}
+			}
 			return Result{Error: fmt.Errorf("only %d eggs available, cannot order %d", available, quantity)}
 		}
 		return Result{Error: fmt.Errorf("creating order: %w", err)}
@@ -305,11 +308,11 @@ func HistoryCmd(ctx context.Context, database *db.DB, senderNpub string) Result 
 func HelpCmd(isAdmin bool) Result {
 	msg := `Available commands:
 • inventory - Check egg availability
-• order <6|12> - Order eggs (half-dozen or dozen)
+• order <quantity> - Order eggs (any multiple of 6)
 • cancel <order_id> - Cancel a pending order
 • balance - Check your payment balance
 • history - View recent orders
-• notify <6|12> - Get notified when inventory reaches quantity
+• notify <quantity> - Get notified when inventory reaches quantity (multiple of 6)
 • notify off - Cancel notification
 • help - Show this message`
 
@@ -334,7 +337,7 @@ Admin commands:
 }
 
 // NotifyCmd manages inventory notification subscriptions.
-// Args: <6|12> to subscribe, "off" to unsubscribe
+// Args: <quantity> (multiple of 6) to subscribe, "off" to unsubscribe
 func NotifyCmd(ctx context.Context, database *db.DB, senderNpub string, args []string) Result {
 	customer, err := database.GetCustomerByNpub(ctx, senderNpub)
 	if err != nil {
@@ -342,28 +345,28 @@ func NotifyCmd(ctx context.Context, database *db.DB, senderNpub string, args []s
 	}
 
 	if len(args) == 0 {
-		existing, err := database.GetInventoryNotification(ctx, customer.ID)
-		if err != nil {
-			return Result{Error: fmt.Errorf("checking notification: %w", err)}
+		existing, notifyErr := database.GetInventoryNotification(ctx, customer.ID)
+		if notifyErr != nil {
+			return Result{Error: fmt.Errorf("checking notification: %w", notifyErr)}
 		}
 		if existing != nil {
 			return Result{Message: fmt.Sprintf("You will be notified when %d eggs are available.\nUse 'notify off' to cancel.", existing.ThresholdEggs)}
 		}
-		return Result{Error: errors.New("usage: notify <6|12> or notify off")}
+		return Result{Error: errors.New("usage: notify <quantity> or notify off (quantity must be a multiple of 6)")}
 	}
 
 	arg := strings.ToLower(args[0])
 
 	if arg == "off" {
-		if err := database.DeleteInventoryNotification(ctx, customer.ID); err != nil {
-			return Result{Error: fmt.Errorf("removing notification: %w", err)}
+		if delErr := database.DeleteInventoryNotification(ctx, customer.ID); delErr != nil {
+			return Result{Error: fmt.Errorf("removing notification: %w", delErr)}
 		}
 		return Result{Message: "Notification cancelled."}
 	}
 
 	qty, err := strconv.Atoi(arg)
-	if err != nil || (qty != 6 && qty != 12) {
-		return Result{Error: errors.New("quantity must be 6 or 12")}
+	if err != nil || qty < 6 || qty%6 != 0 {
+		return Result{Error: errors.New("quantity must be a positive multiple of 6")}
 	}
 
 	if err := database.UpsertInventoryNotification(ctx, customer.ID, qty); err != nil {
